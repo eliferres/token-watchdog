@@ -123,13 +123,13 @@ Every weight and threshold can be overridden from a JSON file. Keys you leave ou
 }
 ```
 
-The weights turn five kinds of token into one number, counted in fresh input tokens. The defaults are the ratios in Anthropic's API price list: a cache write that lives five minutes costs 1.25 times a fresh input token, one that lives an hour costs 2 times, a cache read 0.1 times and an output token 5 times. The two kinds of write are priced apart, and recent Claude Code versions write the one-hour kind heavily, so each usage record's `cache_creation` breakdown is read and each kind gets its own weight. Raw token totals hide this. In the logs this tool was checked against, cache reads were over 90% of the tokens most sessions moved, yet at a tenth of the price they were rarely most of the cost.
+The weights turn five kinds of token into one number, counted in fresh input tokens. The defaults are the ratios in Anthropic's API price list: a cache write that lives five minutes costs 1.25 times a fresh input token, one that lives an hour costs 2 times, a cache read 0.1 times and an output token 5 times. The two kinds of write are priced apart, and recent Claude Code versions write the one-hour kind heavily, so each usage record's `cache_creation` breakdown is read and each kind gets its own weight. Raw token totals hide this. In one measured week of real logs, cache reads were 96% of all tokens but 58% of the weighted total, and output was under 1% of tokens but 15% of the weight.
 
 ## How it works
 
 **One call, counted once.** Claude Code writes a streamed reply as several transcript lines that share one message id, and the output count grows from line to line. On a real log folder about half the usage records were such repeats. Summing them overcounts; keeping the first line undercounts output. token-watchdog keeps the largest (final) counts for each message id.
 
-**Counted once across files.** The same message id can also sit in more than one transcript file; on the logs this was checked against, about 7% of message ids did, most of them in subagent files, always under one session id. It is counted once, credited to the earliest copy.
+**Counted once across files.** The same message id can also sit in more than one transcript file; on the logs this was checked against, 28,652 of 414,953 distinct message ids sat in two or more files, three quarters of them in subagent files, and every copy carried the same session id. It is counted once, credited to the earliest copy.
 
 **Subagents roll up.** A subagent's transcript lives in `<session>/subagents/` and carries its parent's session id. Its calls count toward the parent, marked as subagent work, because the parent is the session you would change.
 
