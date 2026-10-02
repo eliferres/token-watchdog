@@ -25,6 +25,20 @@ __version__ = "0.1.0"
 # comparable in one column.
 DEFAULT_WEIGHTS = {"input": 1.0, "cache_write": 1.25, "cache_read": 0.1, "output": 5.0}
 
+# Where each flag fires. Defaults are set so that steady, healthy agent use stays
+# quiet and each flag marks something worth opening the session for.
+DEFAULT_THRESHOLDS = {
+    # Sessions lighter than this are not judged on cache hit or re-reads: a short
+    # session writes its whole context once and has few turns to read it back.
+    "min_session_weighted": 1_000_000,
+    "cache_hit_min": 0.80,
+    "reread_max": 100.0,
+    "turn_max": 500_000,
+    "session_share_max": 0.25,
+    # With one or two sessions in the window, one of them always holds a big share.
+    "session_share_min_sessions": 3,
+}
+
 USAGE_FIELDS = (
     ("input", "input_tokens"),
     ("cache_write", "cache_creation_input_tokens"),
@@ -261,3 +275,50 @@ def summarize(result: Scan, weights: Dict[str, float], end_day: date, days_in_wi
         "sessions": sorted(sessions.values(), key=lambda b: (-b["weighted"], b["project"], b["session"])),
         "days": [dict(bucket, day=key) for key, bucket in sorted(days.items())],
     }
+
+
+def short_id(session: str) -> str:
+    return session[:8]
+
+
+def find_flags(report: dict, thresholds: Dict[str, float]) -> List[dict]:
+    """Every threshold the window crossed, one entry per session and rule."""
+    flags = []
+    labels = {p["project"]: p["label"] for p in report["projects"]}
+
+    def flag(rule: str, session: dict, value: float, limit: float, message: str) -> None:
+        flags.append({"rule": rule, "project": session["project"], "label": labels[session["project"]],
+                      "session": session["session"], "value": value, "limit": limit, "message": message})
+
+    judged = [s for s in report["sessions"] if s["weighted"] >= thresholds["min_session_weighted"]]
+    for session in judged:
+        hit = cache_hit(session["tokens"])
+        if hit is not None and hit < thresholds["cache_hit_min"]:
+            flag("low-cache-hit", session, hit, thresholds["cache_hit_min"],
+                 f"{hit:.0%} of input came from cache, below {thresholds['cache_hit_min']:.0%}")
+    for session in judged:
+        ratio = reread_ratio(session["tokens"])
+        if ratio is not None and ratio > thresholds["reread_max"]:
+            flag("reread-heavy", session, ratio, thresholds["reread_max"],
+                 f"each cached token was read back {ratio:.0f} times, over {thresholds['reread_max']:g}")
+    for session in report["sessions"]:
+        if session["largest_turn"] > thresholds["turn_max"]:
+            flag("outsized-turn", session, session["largest_turn"], thresholds["turn_max"],
+                 f"one call weighed {human(session['largest_turn'])}, over {human(thresholds['turn_max'])}")
+    total = report["total"]["weighted"]
+    if total and len(report["sessions"]) >= thresholds["session_share_min_sessions"]:
+        for session in report["sessions"]:
+            share = session["weighted"] / total
+            if share > thresholds["session_share_max"]:
+                flag("session-share", session, share, thresholds["session_share_max"],
+                     f"{share:.0%} of the window's weighted total, over {thresholds['session_share_max']:.0%}")
+    return flags
+
+
+def human(count: float) -> str:
+    """Token counts the way people say them: 950, 12k, 3.4M."""
+    if count >= 1e6:
+        return f"{count / 1e6:.1f}M"
+    if count >= 1e3:
+        return f"{count / 1e3:.0f}k"
+    return f"{count:.0f}"
