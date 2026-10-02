@@ -120,6 +120,15 @@ class ThresholdsTest(unittest.TestCase):
     def test_percentages_round_down(self) -> None:
         self.assertEqual([tw.percent(v) for v in (0.994, 1.0, 0.0, 0.29, None)], ["99%", "100%", "0%", "29%", "-"])
 
+    def test_messages_use_singular_for_one(self) -> None:
+        once = session("once", inp=1_000, write=500_000, read=600_000, largest=90_000)
+        flags = tw.find_flags(report(once), dict(LIMITS, reread_max=0.5, session_share_min_sessions=1,
+                                                session_share_min=0, session_share_factor=0.5,
+                                                cache_hit_min=0, min_session_weighted=0))
+        messages = " / ".join(f["message"] for f in flags)
+        self.assertIn("read back 1 time, over 0.5", messages)
+        self.assertIn("fair share of 1 session (", messages)
+
     def test_human_counts(self) -> None:
         self.assertEqual([tw.human(n) for n in (950, 12_400, 3_449_999)], ["950", "12k", "3.4M"])
 

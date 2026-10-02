@@ -61,6 +61,12 @@ class CliTest(unittest.TestCase):
         self.assertIn("  outsized-turn  web spike-se\n                 one call weighed 568k, over 500k, 100% of its session\n", out)
         self.assertTrue(out.endswith("FLAGGED: 1 flag in 1 session\n"))
 
+    def test_a_one_call_session_says_call(self) -> None:
+        self.add_spike()
+        _, out, _ = run(*self.window)
+        self.assertIn("  spike-se     1 call   hit", out)
+        self.assertNotIn(" 1 calls", out)
+
     def test_json_carries_the_same_verdict(self) -> None:
         self.add_spike()
         code, out, _ = run(*self.window, "--json")

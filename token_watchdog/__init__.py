@@ -352,7 +352,7 @@ def find_flags(report: dict, thresholds: Dict[str, float]) -> List[dict]:
         ratio = reread_ratio(session["tokens"])
         if ratio is not None and ratio > thresholds["reread_max"]:
             flag("reread-heavy", session, ratio, thresholds["reread_max"],
-                 f"each cached token was read back {ratio:.0f} times, over {thresholds['reread_max']:g}")
+                 f"each cached token was read back {plural(round(ratio), 'time')}, over {thresholds['reread_max']:g}")
     for session in report["sessions"]:
         # The largest call is also the largest share, so it alone decides the rule.
         largest = session["largest_turn"]
@@ -365,7 +365,7 @@ def find_flags(report: dict, thresholds: Dict[str, float]) -> List[dict]:
     if total and judged and len(judged) >= thresholds["session_share_min_sessions"]:
         fair = thresholds["session_share_factor"] / len(judged)
         limit = max(fair, thresholds["session_share_min"])
-        reason = (f"{thresholds['session_share_factor']:g}x a fair share of {len(judged)} sessions"
+        reason = (f"{thresholds['session_share_factor']:g}x a fair share of {plural(len(judged), 'session')}"
                   if fair >= thresholds["session_share_min"] else "the floor")
         for session in judged:
             share = session["weighted"] / total
@@ -472,7 +472,7 @@ def render_text(report: dict, top: int) -> str:
         hit, ratio = cache_hit(s["tokens"]), reread_ratio(s["tokens"])
         lines.append(
             f"  {human(s['weighted']):>7}  {percent(_share(s['weighted'], grand)):>4}  {labels[s['project']]:<{width}}"
-            f"  {short_id(s['session'])}  {s['turns']:>4} calls"
+            f"  {short_id(s['session'])}  {s['turns']:>4} {'call ' if s['turns'] == 1 else 'calls'}"
             f"  hit {percent(hit):>4}"
             f"  reread {'-' if ratio is None else format(ratio, '.0f') + 'x':>4}"
             f"  subagents {percent(_share(s['subagent_weighted'], s['weighted']))}")
