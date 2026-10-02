@@ -144,6 +144,17 @@ class CliTest(unittest.TestCase):
         self.assertIn("skipped 1 unreadable file\n", out)
         self.assertEqual(json.loads(data)["unreadable_files"], 1)
 
+    def test_one_project_folder_is_read_as_one_project(self) -> None:
+        sub = assistant("calm-sub", "2026-09-26T12:00:00Z", "calm-session", inp=50, sidechain=True,
+                        cwd="/home/dev/api")
+        write_log(self.logs, "-home-dev-api", "agent-a1.jsonl", [sub], subagent_of="calm-session")
+        code, out, _ = run("--projects-dir", str(self.logs / "-home-dev-api"), "--now", "2026-09-30", "--json")
+        data = json.loads(out)
+        self.assertEqual(code, 0)
+        self.assertEqual([(p["project"], p["label"], p["sessions"]) for p in data["projects"]],
+                         [("-home-dev-api", "api", 1)])
+        self.assertEqual(data["sessions"][0]["subagent_turns"], 1)
+
     def test_config_dir_variable_finds_the_logs(self) -> None:
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.tmp)}):
             code, out, _ = run("--now", "2026-09-30")

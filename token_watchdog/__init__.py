@@ -134,7 +134,7 @@ def _usage_tokens(usage: object) -> Optional[Dict[str, int]]:
 
 def _project_and_session(parts: Tuple[str, ...], path: Path, entry: dict) -> Tuple[str, str, bool]:
     """parts is the file's path relative to the transcript root, computed once per file."""
-    project = parts[0] if len(parts) > 1 else "(root)"
+    project = parts[0]
     in_subagents = "subagents" in parts[1:-1] or path.name.startswith("agent-")
     session = entry.get("sessionId")
     if not isinstance(session, str) or not session:
@@ -161,7 +161,11 @@ def scan(root: Path, start: datetime, end: datetime) -> Scan:
     by_id: Dict[str, Turn] = {}
     loose: List[Turn] = []
     floor = start.timestamp()
-    for path in transcript_files(root):
+    files = transcript_files(root)
+    # Transcripts directly inside root mean root is one project's folder, not the
+    # folder of projects: name every file's project after root itself.
+    prefix = (root.resolve().name,) if any(p.parent == root for p in files) else ()
+    for path in files:
         try:
             if path.stat().st_mtime < floor:
                 continue  # last written before the window opened
@@ -171,7 +175,7 @@ def scan(root: Path, start: datetime, end: datetime) -> Scan:
             continue
         result.files_read += 1
         bad_before = result.malformed_lines
-        parts = path.relative_to(root).parts
+        parts = prefix + path.relative_to(root).parts
         with handle:
             for line_no, line in enumerate(handle, 1):
                 if not line.strip():

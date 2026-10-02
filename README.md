@@ -75,7 +75,7 @@ token-watchdog [--days N] [--now YYYY-MM-DD] [--projects-dir DIR]
 | --- | --- |
 | `--days N` | Calendar days in the window, counting the last day. Default 7. |
 | `--now YYYY-MM-DD` | Last day of the window. Default today. Pin it to make a report reproducible. |
-| `--projects-dir DIR` | Transcript folder. Default `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`. |
+| `--projects-dir DIR` | Transcript folder. Default `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`. Pointing it at one project's folder audits that project alone. |
 | `--config FILE` | JSON file overriding weights and thresholds (below). |
 | `--top N` | Sessions listed in the text report. Default 5. The JSON lists all of them. |
 | `--json` | The full report as JSON: totals, projects, days, every session with its ratios, and the flags. |
