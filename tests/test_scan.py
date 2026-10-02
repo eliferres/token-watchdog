@@ -107,6 +107,14 @@ class ScanTest(unittest.TestCase):
         os.utime(path, (stale, stale))
         self.assertEqual(scan_window(self.root).files_read, 0)
 
+    def test_each_file_path_is_resolved_once_not_per_line(self) -> None:
+        write_log(self.root, "p", "s.jsonl", [
+            assistant(f"m{n}", "2026-09-29T09:00:00Z", "s", inp=1) for n in range(50)])
+        original = Path.relative_to
+        with mock.patch.object(Path, "relative_to", autospec=True, side_effect=original) as spy:
+            scan_window(self.root)
+        self.assertEqual(spy.call_count, 1)
+
     def test_project_label_comes_from_the_working_directory(self) -> None:
         write_log(self.root, "-home-dev-api", "s.jsonl",
                   [assistant("m1", "2026-09-29T09:00:00Z", "s", inp=1, cwd="/home/dev/api")])

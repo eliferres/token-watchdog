@@ -131,8 +131,8 @@ def _usage_tokens(usage: object) -> Optional[Dict[str, int]]:
     return tokens
 
 
-def _project_and_session(root: Path, path: Path, entry: dict) -> Tuple[str, str, bool]:
-    parts = path.relative_to(root).parts
+def _project_and_session(parts: Tuple[str, ...], path: Path, entry: dict) -> Tuple[str, str, bool]:
+    """parts is the file's path relative to the transcript root, computed once per file."""
     project = parts[0] if len(parts) > 1 else "(root)"
     in_subagents = "subagents" in parts[1:-1] or path.name.startswith("agent-")
     session = entry.get("sessionId")
@@ -169,6 +169,7 @@ def scan(root: Path, start: datetime, end: datetime) -> Scan:
             continue
         result.files_read += 1
         bad_before = result.malformed_lines
+        parts = path.relative_to(root).parts
         with handle:
             for line_no, line in enumerate(handle, 1):
                 if not line.strip():
@@ -181,7 +182,7 @@ def scan(root: Path, start: datetime, end: datetime) -> Scan:
                 if not isinstance(entry, dict):
                     result.malformed_lines += 1
                     continue
-                project, session, sidechain = _project_and_session(root, path, entry)
+                project, session, sidechain = _project_and_session(parts, path, entry)
                 _note_label(result.labels, project, entry.get("cwd"))
                 message = entry.get("message")
                 if not isinstance(message, dict) or "usage" not in message:
