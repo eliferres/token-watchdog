@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -92,6 +93,18 @@ class DemoTranscriptTest(unittest.TestCase):
         text = RECORD.read_text(encoding="utf-8")
         for marker in ("/Users/", "/home/runner", "/private/var", "/var/folders", "/tmp/"):
             self.assertNotIn(marker, text)
+
+    def test_readme_console_blocks_match_the_record(self) -> None:
+        readme = (REPO / "README.md").read_text(encoding="utf-8")
+        blocks = re.findall(r"```console\n(.*?)```", readme, re.S)
+        self.assertTrue(blocks, "the README shows no console session")
+        recorded = {entry["cmd"]: entry["out"] for entry in self.record}
+        for block in blocks:
+            cmd, _, out = block.partition("\n")
+            self.assertTrue(cmd.startswith("$ "), block[:60])
+            with self.subTest(cmd=cmd):
+                self.assertIn(cmd[2:], recorded, "README command missing from the record")
+                self.assertEqual(out.rstrip("\n"), recorded[cmd[2:]])
 
     def test_picture_draws_the_record_in_order(self) -> None:
         rows = picture_rows()
