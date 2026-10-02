@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -407,7 +408,7 @@ def render_text(report: dict, top: int) -> str:
     lines += [
         f"weighted {human(grand)} input-equivalent (fresh {human(t['input'])}, cache write "
         f"{human(t['cache_write'])}, cache read {human(t['cache_read'])}, output {human(t['output'])})",
-        f"cache hit {cache_hit(t):.0%}, subagents {sub / grand:.0%} of the weighted total",
+        f"cache hit {percent(cache_hit(t))}, subagents {sub / grand:.0%} of the weighted total",
         "", "by project",
     ]
     width = max(len(p["label"]) for p in report["projects"])
@@ -427,7 +428,7 @@ def render_text(report: dict, top: int) -> str:
         lines.append(
             f"  {human(s['weighted']):>7}  {s['weighted'] / grand:4.0%}  {labels[s['project']]:<{width}}"
             f"  {short_id(s['session'])}  {s['turns']:>4} calls"
-            f"  hit {'-' if hit is None else format(hit, '.0%'):>4}"
+            f"  hit {percent(hit):>4}"
             f"  reread {'-' if ratio is None else format(ratio, '.0f') + 'x':>4}"
             f"  subagents {s['subagent_weighted'] / s['weighted'] if s['weighted'] else 0:.0%}")
     lines.append("")
@@ -436,13 +437,19 @@ def render_text(report: dict, top: int) -> str:
         lines.append("flags")
         rule_width = max(len(f["rule"]) for f in flags)
         for f in flags:
-            lines.append(f"  {f['rule']:<{rule_width}}  {f['label']} {short_id(f['session'])}: {f['message']}")
+            lines.append(f"  {f['rule']:<{rule_width}}  {f['label']} {short_id(f['session'])}")
+            lines.append(f"  {'':<{rule_width}}  {f['message']}")
         lines.append("")
     lines += _malformed_note(report)
     flagged = len({(f["project"], f["session"]) for f in flags})
     lines.append(f"FLAGGED: {plural(len(flags), 'flag')} in {plural(flagged, 'session')}"
                  if flags else "CLEAN: no flags")
     return "\n".join(lines) + "\n"
+
+
+def percent(share: Optional[float]) -> str:
+    """Round down, so a cache that missed even once never reads as 100%."""
+    return "-" if share is None else f"{math.floor(share * 100)}%"
 
 
 def plural(count: int, noun: str) -> str:

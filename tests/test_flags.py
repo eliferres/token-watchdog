@@ -85,6 +85,9 @@ class ThresholdsTest(unittest.TestCase):
         cold = session("cold", inp=2_000_000, write=1_000_000, read=6_000_000, largest=90_000)
         self.assertEqual(tw.find_flags(report(cold), dict(LIMITS, cache_hit_min=0.5)), [])
 
+    def test_percentages_round_down(self) -> None:
+        self.assertEqual([tw.percent(v) for v in (0.994, 1.0, 0.0, None)], ["99%", "100%", "0%", "-"])
+
     def test_human_counts(self) -> None:
         self.assertEqual([tw.human(n) for n in (950, 12_400, 3_449_999)], ["950", "12k", "3.4M"])
 

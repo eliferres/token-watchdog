@@ -58,7 +58,7 @@ class CliTest(unittest.TestCase):
         self.add_spike()
         code, out, _ = run(*self.window)
         self.assertEqual(code, 1)
-        self.assertIn("outsized-turn  web spike-se: one call weighed 568k, over 500k", out)
+        self.assertIn("  outsized-turn  web spike-se\n                 one call weighed 568k, over 500k\n", out)
         self.assertTrue(out.endswith("FLAGGED: 1 flag in 1 session\n"))
 
     def test_json_carries_the_same_verdict(self) -> None:
