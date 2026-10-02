@@ -13,6 +13,6 @@ All notable changes to this project are documented in this file. The format is b
 - `--json` output carrying the full report, including every session's cache-hit share and re-read ratio.
 - `--days`, `--now`, `--top` and `--projects-dir` options; `CLAUDE_CONFIG_DIR` is honored.
 - JSON config file for weights and thresholds, with unknown keys rejected.
-- Streamed replies and messages copied into resumed sessions are counted once.
+- Streamed replies, and messages that appear in more than one transcript file, are counted once.
 - Subagent usage is credited to the session that started it.
 - Malformed transcript lines are counted and skipped.

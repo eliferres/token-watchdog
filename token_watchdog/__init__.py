@@ -151,9 +151,8 @@ def scan(root: Path, start: datetime, end: datetime) -> Scan:
       and the output count grows from line to line. The copy with the largest counts
       is the final one; summing them all would overcount, keeping the first would
       undercount output.
-    - A resumed or forked session copies earlier messages into a new file, so a
-      message id can appear in several files. It is counted once, in the file and
-      session where it appeared first.
+    - A message id can also appear in more than one transcript file (most often
+      subagent files). It is counted once, credited to its earliest copy.
     - A line can be cut short by a crash or be something other than JSON. It is
       counted and skipped.
     """

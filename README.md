@@ -128,7 +128,7 @@ The weights turn four kinds of token into one number, counted in fresh input tok
 
 **One call, counted once.** Claude Code writes a streamed reply as several transcript lines that share one message id, and the output count grows from line to line. On a real log folder about half the usage records were such repeats. Summing them overcounts; keeping the first line undercounts output. token-watchdog keeps the largest (final) counts for each message id.
 
-**Credited where it happened.** A resumed or forked session copies earlier messages into its own file, so one message id can sit in several transcripts. It is counted once, in the session and file where it first appeared.
+**Counted once across files.** The same message id can also sit in more than one transcript file; on the logs this was checked against, about 7% of message ids did, most of them in subagent files, always under one session id. It is counted once, credited to the earliest copy.
 
 **Subagents roll up.** A subagent's transcript lives in `<session>/subagents/` and carries its parent's session id. Its calls count toward the parent, marked as subagent work, because the parent is the session you would change.
 
