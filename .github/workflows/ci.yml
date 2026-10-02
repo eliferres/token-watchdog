@@ -1,0 +1,31 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Audit the demo logs
+        run: |
+          python -m token_watchdog --projects-dir demo/healthy --now 2026-09-30 --days 3
+          python -m token_watchdog --projects-dir demo/projects --now 2026-09-30 && code=0 || code=$?
+          [ "$code" = 1 ] || { echo "flagged demo exited $code, expected 1"; exit 1; }
+      - name: Install and run the console script
+        run: |
+          python -m pip install .
+          token-watchdog --version
+          token-watchdog --projects-dir demo/healthy --now 2026-09-30 --days 3
