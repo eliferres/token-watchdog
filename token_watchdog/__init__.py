@@ -86,6 +86,7 @@ class Scan:
     malformed_lines: int = 0
     malformed_files: int = 0
     unreadable_files: int = 0
+    unreadable_folders: int = 0
     labels: Dict[str, str] = field(default_factory=dict)  # project dir -> readable name
 
 
@@ -124,8 +125,17 @@ def window_bounds(end_day: date, days: int, tz: Optional[tzinfo]) -> Tuple[datet
     return start.replace(tzinfo=tz), end.replace(tzinfo=tz)
 
 
-def transcript_files(root: Path) -> List[Path]:
-    return sorted(p for p in root.rglob("*.jsonl") if p.is_file())
+def transcript_files(root: Path) -> Tuple[List[Path], int]:
+    """Every .jsonl file under root, and how many folders could not be listed.
+
+    os.walk rather than rglob, because rglob passes over an unreadable folder in
+    silence and the report should say what it could not see.
+    """
+    unreadable: List[OSError] = []
+    files = []
+    for folder, _, names in os.walk(root, onerror=unreadable.append):
+        files += [Path(folder) / n for n in names if n.endswith(".jsonl")]
+    return sorted(p for p in files if p.is_file()), len(unreadable)
 
 
 def _usage_tokens(usage: object) -> Optional[Dict[str, int]]:
@@ -193,7 +203,7 @@ def scan(root: Path, start: datetime, end: datetime) -> Scan:
     by_id: Dict[str, Turn] = {}
     loose: List[Turn] = []
     floor = start.timestamp()
-    files = transcript_files(root)
+    files, result.unreadable_folders = transcript_files(root)
     # Transcripts directly inside root mean root is one project's folder, not the
     # folder of projects: name every file's project after root itself.
     prefix = (root.resolve().name,) if any(p.parent == root for p in files) else ()
@@ -445,6 +455,7 @@ def build_report(root: Path, end_day: date, days: int, weights: Dict[str, float]
     report["files_read"] = result.files_read
     report["malformed"] = {"lines": result.malformed_lines, "files": result.malformed_files}
     report["unreadable_files"] = result.unreadable_files
+    report["unreadable_folders"] = result.unreadable_folders
     report["weights"], report["thresholds"] = weights, thresholds
     return report
 
@@ -523,6 +534,8 @@ def _skipped_notes(report: dict) -> List[str]:
         notes.append(f"skipped {plural(bad['lines'], 'malformed line')} in {plural(bad['files'], 'file')}")
     if report["unreadable_files"]:
         notes.append(f"skipped {plural(report['unreadable_files'], 'unreadable file')}")
+    if report["unreadable_folders"]:
+        notes.append(f"skipped {plural(report['unreadable_folders'], 'unreadable folder')}")
     return notes
 
 

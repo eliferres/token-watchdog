@@ -150,6 +150,20 @@ class CliTest(unittest.TestCase):
         self.assertIn("skipped 1 unreadable file\n", out)
         self.assertEqual(json.loads(data)["unreadable_files"], 1)
 
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads any folder")
+    def test_unreadable_folders_are_counted_and_reported(self) -> None:
+        locked = self.logs / "-home-dev-locked"
+        write_log(self.logs, "-home-dev-locked", "s.jsonl", [assistant("l1", "2026-09-29T12:00:00Z", "l", inp=1)])
+        locked.chmod(0)
+        try:
+            code, out, _ = run(*self.window)
+            _, data, _ = run(*self.window, "--json")
+        finally:
+            locked.chmod(0o755)
+        self.assertEqual(code, 0)
+        self.assertIn("skipped 1 unreadable folder\n", out)
+        self.assertEqual(json.loads(data)["unreadable_folders"], 1)
+
     def test_one_project_folder_is_read_as_one_project(self) -> None:
         sub = assistant("calm-sub", "2026-09-26T12:00:00Z", "calm-session", inp=50, sidechain=True,
                         cwd="/home/dev/api")
