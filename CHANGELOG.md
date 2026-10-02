@@ -7,7 +7,7 @@ All notable changes to this project are documented in this file. The format is b
 ### Added
 
 - `token-watchdog` command that audits Claude Code session logs without calling a model.
-- One weighted total in input-equivalent tokens, broken down by project, session and local day.
+- One weighted total in input-equivalent tokens, broken down by project, session and local day, with one-hour cache writes weighted at 2 and five-minute writes at 1.25.
 - Four flags with configurable thresholds: `low-cache-hit`, `reread-heavy`, `outsized-turn` and `session-share`.
 - Exit code 1 when a flag fires, 0 when none does and 2 on a usage, configuration or unexpected error, for cron and CI.
 - `--json` output carrying the full report, including every session's cache-hit share and re-read ratio.

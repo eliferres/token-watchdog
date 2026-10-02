@@ -37,7 +37,7 @@ class ScanTest(unittest.TestCase):
         result = scan_window(self.root)
         self.assertEqual(len(result.turns), 1)
         self.assertEqual(result.turns[0].tokens,
-                         {"input": 9, "cache_write": 200, "cache_read": 2000, "output": 640})
+                         {"input": 9, "cache_write_5m": 200, "cache_write_1h": 0, "cache_read": 2000, "output": 640})
 
     def test_message_copied_into_a_resumed_session_counts_once_in_the_first(self) -> None:
         original = assistant("msg_b", "2026-09-28T09:00:00Z", "first", inp=10, out=10)
@@ -74,6 +74,21 @@ class ScanTest(unittest.TestCase):
         result = scan_window(self.root)
         self.assertEqual(len(result.turns), 2)
         self.assertEqual((result.malformed_lines, result.malformed_files, result.files_read), (4, 1, 2))
+
+    def test_one_hour_cache_writes_are_weighted_apart_from_five_minute_writes(self) -> None:
+        entry = assistant("m1", "2026-09-29T09:00:00Z", "s", write=1000)
+        entry["message"]["usage"]["cache_creation"] = {
+            "ephemeral_5m_input_tokens": 200, "ephemeral_1h_input_tokens": 800}
+        write_log(self.root, "p", "s.jsonl", [entry, assistant("m2", "2026-09-29T09:01:00Z", "s", write=1000)])
+        split, flat = sorted(scan_window(self.root).turns, key=lambda t: t.owner)
+        self.assertEqual(split.weighted(tw.DEFAULT_WEIGHTS), 200 * 1.25 + 800 * 2.0)
+        self.assertEqual(flat.weighted(tw.DEFAULT_WEIGHTS), 1000 * 1.25)  # no breakdown: five-minute
+
+    def test_inconsistent_cache_breakdown_is_malformed(self) -> None:
+        entry = assistant("m1", "2026-09-29T09:00:00Z", "s", write=100)
+        entry["message"]["usage"]["cache_creation"] = {"ephemeral_1h_input_tokens": 900}
+        write_log(self.root, "p", "s.jsonl", [entry])
+        self.assertEqual(scan_window(self.root).malformed_lines, 1)
 
     def test_message_without_id_is_counted_every_time(self) -> None:
         loose = assistant("x", "2026-09-29T09:00:00Z", "s", inp=3)
@@ -130,14 +145,14 @@ class ScanTest(unittest.TestCase):
 class WeightsAndRatiosTest(unittest.TestCase):
     def test_default_weights_follow_price_ratios(self) -> None:
         turn = tw.Turn("p", "s", False, datetime(2026, 9, 29, tzinfo=UTC),
-                       {"input": 100, "cache_write": 100, "cache_read": 100, "output": 100}, (None, "", 0))
-        self.assertAlmostEqual(turn.weighted(tw.DEFAULT_WEIGHTS), 100 + 125 + 10 + 500)
+                       {"input": 100, "cache_write_5m": 100, "cache_write_1h": 100, "cache_read": 100, "output": 100}, (None, "", 0))
+        self.assertAlmostEqual(turn.weighted(tw.DEFAULT_WEIGHTS), 100 + 125 + 200 + 10 + 500)
 
     def test_cache_hit_and_reread_ratio(self) -> None:
-        tokens = {"input": 10, "cache_write": 90, "cache_read": 900, "output": 5}
+        tokens = {"input": 10, "cache_write_5m": 40, "cache_write_1h": 50, "cache_read": 900, "output": 5}
         self.assertAlmostEqual(tw.cache_hit(tokens), 0.9)
         self.assertAlmostEqual(tw.reread_ratio(tokens), 10.0)
-        empty = {"input": 0, "cache_write": 0, "cache_read": 0, "output": 5}
+        empty = {"input": 0, "cache_write_5m": 0, "cache_write_1h": 0, "cache_read": 0, "output": 5}
         self.assertIsNone(tw.cache_hit(empty))
         self.assertIsNone(tw.reread_ratio(empty))
 

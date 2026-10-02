@@ -110,7 +110,7 @@ Every weight and threshold can be overridden from a JSON file. Keys you leave ou
 
 ```json
 {
-  "weights": {"input": 1, "cache_write": 1.25, "cache_read": 0.1, "output": 5},
+  "weights": {"input": 1, "cache_write_5m": 1.25, "cache_write_1h": 2, "cache_read": 0.1, "output": 5},
   "thresholds": {
     "min_session_weighted": 1000000,
     "cache_hit_min": 0.80,
@@ -122,7 +122,7 @@ Every weight and threshold can be overridden from a JSON file. Keys you leave ou
 }
 ```
 
-The weights turn four kinds of token into one number, counted in fresh input tokens. The defaults are the ratios in Anthropic's API price list: a cache write (five-minute lifetime) costs 1.25 times a fresh input token, a cache read 0.1 times, an output token 5 times. Raw token totals hide this. In the logs this tool was checked against, cache reads were over 90% of the tokens most sessions moved, yet at a tenth of the price they were rarely most of the cost.
+The weights turn five kinds of token into one number, counted in fresh input tokens. The defaults are the ratios in Anthropic's API price list: a cache write that lives five minutes costs 1.25 times a fresh input token, one that lives an hour costs 2 times, a cache read 0.1 times and an output token 5 times. The two kinds of write are priced apart, and recent Claude Code versions write the one-hour kind heavily, so each usage record's `cache_creation` breakdown is read and each kind gets its own weight. Raw token totals hide this. In the logs this tool was checked against, cache reads were over 90% of the tokens most sessions moved, yet at a tenth of the price they were rarely most of the cost.
 
 ## How it works
 
@@ -151,7 +151,7 @@ token-watchdog answers a narrower question for a scheduled job: did anything thi
 ## Limitations
 
 - The transcript format is Claude Code's internal format, not a documented interface. It was checked against real transcripts, and a change to it can break the audit without warning.
-- Cache writes are weighted as one kind. Anthropic prices a one-hour cache write at twice a fresh input token, not 1.25 times, and recent Claude Code sessions use one-hour writes heavily, so the default understates their cost. If most of your writes are one-hour, set `cache_write` to 2 in a config file.
+- A usage record without the `cache_creation` breakdown (older Claude Code versions) has all its cache writes weighted as five-minute writes, which understates them if they were one-hour writes.
 - The weighted number tracks API price ratios. A subscription plan measures its limits its own way, so the total is a guide to relative cost, not a reading of your plan's meter.
 - Claude Code deletes old transcripts after a retention period (the `cleanupPeriodDays` setting), so a window reaching further back than that reports less than was used.
 - Sessions are judged on what falls inside the window. A long session that straddles its start is judged on its in-window part only.

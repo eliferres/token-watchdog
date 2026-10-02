@@ -22,11 +22,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 __version__ = "0.1.0"
 
 # Input-equivalent weights, in units of one fresh input token. They follow the ratios
-# in Anthropic's API price list, which hold across current models: a 5-minute cache
-# write costs 1.25x base input, a cache read 0.1x, an output token 5x. Weighting by
-# price ratio is what makes a 100k-token cache read and a 10k-token fresh input
-# comparable in one column.
-DEFAULT_WEIGHTS = {"input": 1.0, "cache_write": 1.25, "cache_read": 0.1, "output": 5.0}
+# in Anthropic's API price list, which hold across current models: a cache write that
+# lives five minutes costs 1.25x base input, one that lives an hour 2x, a cache read
+# 0.1x, an output token 5x. Weighting by price ratio is what makes a 100k-token cache
+# read and a 10k-token fresh input comparable in one column.
+DEFAULT_WEIGHTS = {"input": 1.0, "cache_write_5m": 1.25, "cache_write_1h": 2.0,
+                   "cache_read": 0.1, "output": 5.0}
 
 # Where each flag fires. Defaults are set so that steady, healthy agent use stays
 # quiet and each flag marks something worth opening the session for.
@@ -44,7 +45,7 @@ DEFAULT_THRESHOLDS = {
 
 USAGE_FIELDS = (
     ("input", "input_tokens"),
-    ("cache_write", "cache_creation_input_tokens"),
+    ("cache_write_5m", "cache_creation_input_tokens"),  # split below when the record allows
     ("cache_read", "cache_read_input_tokens"),
     ("output", "output_tokens"),
 )
@@ -129,7 +130,20 @@ def _usage_tokens(usage: object) -> Optional[Dict[str, int]]:
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             return None
         tokens[name] = value
+    # The record's total covers both cache lifetimes; the cache_creation breakdown,
+    # when present, says how many of those tokens were one-hour writes.
+    breakdown = usage.get("cache_creation")
+    one_hour = breakdown.get("ephemeral_1h_input_tokens", 0) if isinstance(breakdown, dict) else 0
+    one_hour = 0 if one_hour is None else one_hour
+    if isinstance(one_hour, bool) or not isinstance(one_hour, int) or not 0 <= one_hour <= tokens["cache_write_5m"]:
+        return None
+    tokens["cache_write_5m"] -= one_hour
+    tokens["cache_write_1h"] = one_hour
     return tokens
+
+
+def cache_writes(tokens: Dict[str, int]) -> int:
+    return tokens["cache_write_5m"] + tokens["cache_write_1h"]
 
 
 def _project_and_session(parts: Tuple[str, ...], path: Path, entry: dict) -> Tuple[str, str, bool]:
@@ -241,7 +255,7 @@ def _merge(by_id: Dict[str, Turn], key: str, turn: Turn) -> None:
 
 
 def _bucket() -> dict:
-    return {"turns": 0, "weighted": 0.0, "tokens": {name: 0 for name, _ in USAGE_FIELDS}}
+    return {"turns": 0, "weighted": 0.0, "tokens": {name: 0 for name in DEFAULT_WEIGHTS}}
 
 
 def _add(bucket: dict, turn: Turn, weighted: float) -> None:
@@ -253,13 +267,14 @@ def _add(bucket: dict, turn: Turn, weighted: float) -> None:
 
 def cache_hit(tokens: Dict[str, int]) -> Optional[float]:
     """Share of all input tokens served from cache: read / (fresh + write + read)."""
-    total_in = tokens["input"] + tokens["cache_write"] + tokens["cache_read"]
+    total_in = tokens["input"] + cache_writes(tokens) + tokens["cache_read"]
     return tokens["cache_read"] / total_in if total_in else None
 
 
 def reread_ratio(tokens: Dict[str, int]) -> Optional[float]:
     """How many times each token written to the cache was read back."""
-    return tokens["cache_read"] / tokens["cache_write"] if tokens["cache_write"] else None
+    writes = cache_writes(tokens)
+    return tokens["cache_read"] / writes if writes else None
 
 
 def local_day(moment: datetime, tz: Optional[tzinfo]) -> date:
@@ -420,7 +435,7 @@ def render_text(report: dict, top: int) -> str:
     sub = sum(s["subagent_weighted"] for s in report["sessions"])
     lines += [
         f"weighted {human(grand)} input-equivalent (fresh {human(t['input'])}, cache write "
-        f"{human(t['cache_write'])}, cache read {human(t['cache_read'])}, output {human(t['output'])})",
+        f"{human(cache_writes(t))}, cache read {human(t['cache_read'])}, output {human(t['output'])})",
         f"cache hit {percent(cache_hit(t))}, subagents {_share(sub, grand):.0%} of the weighted total",
         "", "by project",
     ]

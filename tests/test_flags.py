@@ -10,7 +10,7 @@ LIMITS = dict(tw.DEFAULT_THRESHOLDS)
 
 def session(name: str, inp: int = 0, write: int = 0, read: int = 0, out: int = 0,
             largest: float = 0.0, project: str = "p") -> dict:
-    tokens = {"input": inp, "cache_write": write, "cache_read": read, "output": out}
+    tokens = {"input": inp, "cache_write_5m": write, "cache_write_1h": 0, "cache_read": read, "output": out}
     weighted = sum(tokens[k] * tw.DEFAULT_WEIGHTS[k] for k in tokens)
     return {"project": project, "session": name, "tokens": tokens, "weighted": weighted,
             "turns": 1, "largest_turn": largest or weighted}
