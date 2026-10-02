@@ -37,7 +37,11 @@ DEFAULT_THRESHOLDS = {
     "min_session_weighted": 1_000_000,
     "cache_hit_min": 0.80,
     "reread_max": 100.0,
+    # A call is flagged when it is both this large and this big a part of its own
+    # session. On a 1M-context model a full-context cache write passes 500k as a
+    # matter of course; it is worth a look only when it dominates its session.
     "turn_max": 500_000,
+    "turn_share_min": 0.10,
     # A session is flagged past this many times its fair share (1/N of the window,
     # N = sessions over min_session_weighted), and only when N is at least the
     # minimum below: among three or four sessions a big share is arithmetic.
@@ -347,9 +351,13 @@ def find_flags(report: dict, thresholds: Dict[str, float]) -> List[dict]:
             flag("reread-heavy", session, ratio, thresholds["reread_max"],
                  f"each cached token was read back {ratio:.0f} times, over {thresholds['reread_max']:g}")
     for session in report["sessions"]:
-        if session["largest_turn"] > thresholds["turn_max"]:
-            flag("outsized-turn", session, session["largest_turn"], thresholds["turn_max"],
-                 f"one call weighed {human(session['largest_turn'])}, over {human(thresholds['turn_max'])}")
+        # The largest call is also the largest share, so it alone decides the rule.
+        largest = session["largest_turn"]
+        share = _share(largest, session["weighted"])
+        if largest > thresholds["turn_max"] and share >= thresholds["turn_share_min"]:
+            flag("outsized-turn", session, largest, thresholds["turn_max"],
+                 f"one call weighed {human(largest)}, over {human(thresholds['turn_max'])}, "
+                 f"{percent(share)} of its session")
     total = report["total"]["weighted"]
     if total and judged and len(judged) >= thresholds["session_share_min_sessions"]:
         limit = thresholds["session_share_factor"] / len(judged)

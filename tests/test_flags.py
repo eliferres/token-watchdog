@@ -66,6 +66,18 @@ class OutsizedTurnTest(unittest.TestCase):
         self.assertIn("one call weighed 600k, over 500k", flags[0]["message"])
 
 
+    def test_quiet_when_the_call_is_a_small_part_of_a_large_session(self) -> None:
+        # A full-context cache write on a 1M-context model: big, but routine for its session.
+        routine = session("routine", inp=50_000, write=2_000_000, read=80_000_000, out=200_000, largest=600_000)
+        self.assertLess(600_000 / routine["weighted"], 0.10)
+        self.assertEqual(tw.find_flags(report(routine), LIMITS), [])
+
+    def test_fires_at_ten_percent_of_its_session(self) -> None:
+        heavy = session("heavy", inp=100_000, write=1_000_000, read=30_000_000, largest=600_000)
+        self.assertGreaterEqual(600_000 / heavy["weighted"], 0.10)
+        self.assertEqual(rules(tw.find_flags(report(heavy), LIMITS)), [("outsized-turn", "heavy")])
+
+
 class SessionShareTest(unittest.TestCase):
     def test_fires_past_twice_a_fair_share_among_five_judged_sessions(self) -> None:
         big = session("big", inp=20_000, write=800_000, read=60_000_000, out=60_000, largest=90_000)  # 7.3M
