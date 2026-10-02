@@ -140,13 +140,22 @@ def _usage_tokens(usage: object) -> Optional[Dict[str, int]]:
             return None
         tokens[name] = value
     # The record's total covers both cache lifetimes; the cache_creation breakdown,
-    # when present, says how many of those tokens were one-hour writes.
+    # when present, says how many were one-hour writes. Records that carry an
+    # iterations list can report a total of 0 beside a real breakdown, so when the
+    # breakdown adds up to more than the total, the breakdown is used.
     breakdown = usage.get("cache_creation")
-    one_hour = breakdown.get("ephemeral_1h_input_tokens", 0) if isinstance(breakdown, dict) else 0
-    one_hour = 0 if one_hour is None else one_hour
-    if isinstance(one_hour, bool) or not isinstance(one_hour, int) or not 0 <= one_hour <= tokens["cache_write_5m"]:
-        return None
-    tokens["cache_write_5m"] -= one_hour
+    breakdown = breakdown if isinstance(breakdown, dict) else {}
+    parts = []
+    for key in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"):
+        value = breakdown.get(key) or 0
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return None
+        parts.append(value)
+    five_minute, one_hour = parts
+    if five_minute + one_hour > tokens["cache_write_5m"]:
+        tokens["cache_write_5m"] = five_minute
+    else:
+        tokens["cache_write_5m"] -= one_hour
     tokens["cache_write_1h"] = one_hour
     return tokens
 

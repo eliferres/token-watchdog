@@ -84,11 +84,17 @@ class ScanTest(unittest.TestCase):
         self.assertEqual(split.weighted(tw.DEFAULT_WEIGHTS), 200 * 1.25 + 800 * 2.0)
         self.assertEqual(flat.weighted(tw.DEFAULT_WEIGHTS), 1000 * 1.25)  # no breakdown: five-minute
 
-    def test_inconsistent_cache_breakdown_is_malformed(self) -> None:
-        entry = assistant("m1", "2026-09-29T09:00:00Z", "s", write=100)
-        entry["message"]["usage"]["cache_creation"] = {"ephemeral_1h_input_tokens": 900}
+    def test_breakdown_larger_than_the_total_wins(self) -> None:
+        # Records with an iterations list report a zero total beside a real breakdown.
+        entry = assistant("m1", "2026-09-29T09:00:00Z", "s", write=0, read=70_000, out=300)
+        entry["message"]["usage"]["cache_creation"] = {
+            "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 11_323}
+        entry["message"]["usage"]["iterations"] = [{"type": "message"}]
         write_log(self.root, "p", "s.jsonl", [entry])
-        self.assertEqual(scan_window(self.root).malformed_lines, 1)
+        result = scan_window(self.root)
+        self.assertEqual(result.malformed_lines, 0)
+        self.assertEqual(result.turns[0].tokens,
+                         {"input": 0, "cache_write_5m": 0, "cache_write_1h": 11_323, "cache_read": 70_000, "output": 300})
 
     def test_message_without_id_is_counted_every_time(self) -> None:
         loose = assistant("x", "2026-09-29T09:00:00Z", "s", inp=3)
