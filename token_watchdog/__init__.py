@@ -1,0 +1,263 @@
+"""Audit Claude Code session logs for wasteful token use, without calling a model.
+
+Claude Code writes one JSONL transcript per session under ~/.claude/projects/<project>/,
+with subagent transcripts beside it in <session-id>/subagents/. Every assistant entry
+carries the API usage record for that call. This module reads those records, weights
+them into one input-equivalent number, and breaks the result down by project, session
+and day.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+from dataclasses import dataclass, field
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
+
+__version__ = "0.1.0"
+
+# Input-equivalent weights, in units of one fresh input token. They follow the ratios
+# in Anthropic's API price list, which hold across current models: a 5-minute cache
+# write costs 1.25x base input, a cache read 0.1x, an output token 5x. Weighting by
+# price ratio is what makes a 100k-token cache read and a 10k-token fresh input
+# comparable in one column.
+DEFAULT_WEIGHTS = {"input": 1.0, "cache_write": 1.25, "cache_read": 0.1, "output": 5.0}
+
+USAGE_FIELDS = (
+    ("input", "input_tokens"),
+    ("cache_write", "cache_creation_input_tokens"),
+    ("cache_read", "cache_read_input_tokens"),
+    ("output", "output_tokens"),
+)
+
+_FRACTION = re.compile(r"\.(\d+)")
+
+
+@dataclass
+class Turn:
+    """One API call, counted once however many transcript lines repeat it."""
+
+    project: str
+    session: str
+    sidechain: bool
+    when: datetime
+    tokens: Dict[str, int]
+    owner: Tuple[datetime, str, int]  # (time, file, line): the earliest copy wins
+
+    def weighted(self, weights: Dict[str, float]) -> float:
+        return sum(self.tokens[k] * weights[k] for k in self.tokens)
+
+
+@dataclass
+class Scan:
+    turns: List[Turn] = field(default_factory=list)
+    files_read: int = 0
+    malformed_lines: int = 0
+    malformed_files: int = 0
+    labels: Dict[str, str] = field(default_factory=dict)  # project dir -> readable name
+
+
+def default_projects_dir() -> Path:
+    """Where Claude Code keeps transcripts: $CLAUDE_CONFIG_DIR/projects, else ~/.claude/projects."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(base).expanduser() / "projects" if base else Path.home() / ".claude" / "projects"
+
+
+def parse_timestamp(text: str) -> Optional[datetime]:
+    """Parse an ISO 8601 timestamp into an aware datetime; a missing offset means UTC.
+
+    Python 3.9's fromisoformat rejects a trailing Z and fractions that are not three
+    or six digits long, so both are normalized first.
+    """
+    if not isinstance(text, str) or not text:
+        return None
+    text = text.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    text = _FRACTION.sub(lambda m: "." + (m.group(1) + "000000")[:6], text, count=1)
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def window_bounds(end_day: date, days: int, tz: Optional[tzinfo]) -> Tuple[datetime, datetime]:
+    """The window is whole calendar days in the report's time zone, ending with end_day."""
+    start_day = end_day - timedelta(days=days - 1)
+    start = datetime.combine(start_day, time.min)
+    end = datetime.combine(end_day + timedelta(days=1), time.min)
+    if tz is None:
+        return start.astimezone(), end.astimezone()  # naive -> local zone, DST-aware
+    return start.replace(tzinfo=tz), end.replace(tzinfo=tz)
+
+
+def transcript_files(root: Path) -> List[Path]:
+    return sorted(p for p in root.rglob("*.jsonl") if p.is_file())
+
+
+def _usage_tokens(usage: object) -> Optional[Dict[str, int]]:
+    if not isinstance(usage, dict):
+        return None
+    tokens = {}
+    for name, key in USAGE_FIELDS:
+        value = usage.get(key, 0)
+        if value is None:
+            value = 0
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return None
+        tokens[name] = value
+    return tokens
+
+
+def _project_and_session(root: Path, path: Path, entry: dict) -> Tuple[str, str, bool]:
+    parts = path.relative_to(root).parts
+    project = parts[0] if len(parts) > 1 else "(root)"
+    in_subagents = "subagents" in parts[1:-1] or path.name.startswith("agent-")
+    session = entry.get("sessionId")
+    if not isinstance(session, str) or not session:
+        # A subagent file lives in <session-id>/subagents/, so its folder names the parent.
+        session = parts[1] if in_subagents and len(parts) > 3 else path.stem
+    sidechain = in_subagents or entry.get("isSidechain") is True
+    return project, session, sidechain
+
+
+def scan(root: Path, start: datetime, end: datetime) -> Scan:
+    """Collect every API call made in [start, end) under root.
+
+    Three properties of real transcripts shape this loop:
+    - A streamed response is written as several lines that share one message id,
+      and the output count grows from line to line. The copy with the largest counts
+      is the final one; summing them all would overcount, keeping the first would
+      undercount output.
+    - A resumed or forked session copies earlier messages into a new file, so a
+      message id can appear in several files. It is counted once, in the file and
+      session where it appeared first.
+    - A line can be cut short by a crash or be something other than JSON. It is
+      counted and skipped.
+    """
+    result = Scan()
+    by_id: Dict[str, Turn] = {}
+    loose: List[Turn] = []
+    floor = start.timestamp()
+    for path in transcript_files(root):
+        try:
+            if path.stat().st_mtime < floor:
+                continue  # last written before the window opened
+            handle = path.open(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        result.files_read += 1
+        bad_before = result.malformed_lines
+        with handle:
+            for line_no, line in enumerate(handle, 1):
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    result.malformed_lines += 1
+                    continue
+                if not isinstance(entry, dict):
+                    result.malformed_lines += 1
+                    continue
+                project, session, sidechain = _project_and_session(root, path, entry)
+                cwd = entry.get("cwd")
+                if isinstance(cwd, str) and cwd:
+                    result.labels.setdefault(project, Path(cwd).name or cwd)
+                message = entry.get("message")
+                if not isinstance(message, dict) or "usage" not in message:
+                    continue
+                tokens = _usage_tokens(message.get("usage"))
+                when = parse_timestamp(entry.get("timestamp", ""))
+                if tokens is None or when is None:
+                    result.malformed_lines += 1
+                    continue
+                if not start <= when < end:
+                    continue
+                turn = Turn(project, session, sidechain, when, tokens, (when, str(path), line_no))
+                key = message.get("id") or entry.get("requestId")
+                if not isinstance(key, str) or not key:
+                    loose.append(turn)
+                    continue
+                _merge(by_id, key, turn)
+        if result.malformed_lines > bad_before:
+            result.malformed_files += 1
+    result.turns = sorted(list(by_id.values()) + loose, key=lambda t: t.owner)
+    return result
+
+
+def _merge(by_id: Dict[str, Turn], key: str, turn: Turn) -> None:
+    held = by_id.get(key)
+    if held is None:
+        by_id[key] = turn
+        return
+    if turn.owner < held.owner:  # keep the earliest copy's place and session
+        turn, held = held, turn
+        by_id[key] = held
+    if (turn.tokens["output"], sum(turn.tokens.values())) > (held.tokens["output"], sum(held.tokens.values())):
+        held.tokens = turn.tokens  # keep the final, largest counts
+
+
+def _bucket() -> dict:
+    return {"turns": 0, "weighted": 0.0, "tokens": {name: 0 for name, _ in USAGE_FIELDS}}
+
+
+def _add(bucket: dict, turn: Turn, weighted: float) -> None:
+    bucket["turns"] += 1
+    bucket["weighted"] += weighted
+    for name, count in turn.tokens.items():
+        bucket["tokens"][name] += count
+
+
+def cache_hit(tokens: Dict[str, int]) -> Optional[float]:
+    """Share of all input tokens served from cache: read / (fresh + write + read)."""
+    total_in = tokens["input"] + tokens["cache_write"] + tokens["cache_read"]
+    return tokens["cache_read"] / total_in if total_in else None
+
+
+def reread_ratio(tokens: Dict[str, int]) -> Optional[float]:
+    """How many times each token written to the cache was read back."""
+    return tokens["cache_read"] / tokens["cache_write"] if tokens["cache_write"] else None
+
+
+def local_day(moment: datetime, tz: Optional[tzinfo]) -> date:
+    """The calendar day of moment in tz; None means the machine's zone, DST included."""
+    return (moment.astimezone(tz) if tz is not None else moment.astimezone()).date()
+
+
+def summarize(result: Scan, weights: Dict[str, float], end_day: date, days_in_window: int,
+              tz: Optional[tzinfo]) -> dict:
+    """Roll the turns up by project, session and day."""
+    total = _bucket()
+    projects: Dict[str, dict] = {}
+    sessions: Dict[Tuple[str, str], dict] = {}
+    days = {(end_day - timedelta(days=n)).isoformat(): _bucket() for n in range(days_in_window)}
+    for turn in result.turns:
+        weighted = turn.weighted(weights)
+        _add(total, turn, weighted)
+        _add(projects.setdefault(turn.project, _bucket()), turn, weighted)
+        _add(days.setdefault(local_day(turn.when, tz).isoformat(), _bucket()), turn, weighted)
+        session = sessions.get((turn.project, turn.session))
+        if session is None:
+            session = sessions[(turn.project, turn.session)] = dict(
+                _bucket(), subagent_turns=0, subagent_weighted=0.0, largest_turn=0.0)
+        _add(session, turn, weighted)
+        session["largest_turn"] = max(session["largest_turn"], weighted)
+        if turn.sidechain:
+            session["subagent_turns"] += 1
+            session["subagent_weighted"] += weighted
+    for (project, session_id), session in sessions.items():
+        session.update(project=project, session=session_id)
+        projects[project].setdefault("sessions", 0)
+        projects[project]["sessions"] += 1
+    for project, bucket in projects.items():
+        bucket.update(project=project, label=result.labels.get(project, project))
+    return {
+        "total": total,
+        "projects": sorted(projects.values(), key=lambda b: (-b["weighted"], b["project"])),
+        "sessions": sorted(sessions.values(), key=lambda b: (-b["weighted"], b["project"], b["session"])),
+        "days": [dict(bucket, day=key) for key, bucket in sorted(days.items())],
+    }
