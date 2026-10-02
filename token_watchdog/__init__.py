@@ -47,6 +47,9 @@ DEFAULT_THRESHOLDS = {
     # minimum below: among three or four sessions a big share is arithmetic.
     "session_share_factor": 2.0,
     "session_share_min_sessions": 5,
+    # In a busy week twice a fair share is tiny (113 sessions put it under 2%), so a
+    # session must also hold at least this share of the window.
+    "session_share_min": 0.10,
 }
 
 USAGE_FIELDS = (
@@ -360,13 +363,15 @@ def find_flags(report: dict, thresholds: Dict[str, float]) -> List[dict]:
                  f"{percent(share)} of its session")
     total = report["total"]["weighted"]
     if total and judged and len(judged) >= thresholds["session_share_min_sessions"]:
-        limit = thresholds["session_share_factor"] / len(judged)
+        fair = thresholds["session_share_factor"] / len(judged)
+        limit = max(fair, thresholds["session_share_min"])
+        reason = (f"{thresholds['session_share_factor']:g}x a fair share of {len(judged)} sessions"
+                  if fair >= thresholds["session_share_min"] else "the floor")
         for session in judged:
             share = session["weighted"] / total
             if share > limit:
                 flag("session-share", session, share, limit,
-                     f"{percent(share)} of the window's weighted total, over "
-                     f"{thresholds['session_share_factor']:g}x a fair share of {len(judged)} sessions ({percent(limit)})")
+                     f"{percent(share)} of the window's weighted total, over {reason} ({percent(limit)})")
     return flags
 
 

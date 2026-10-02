@@ -60,7 +60,7 @@ Every output in this README and in the picture comes from `demo/transcript.json`
 | `low-cache-hit` | A session where a small share of input came from the prompt cache | under 80% | Claude Code re-sends the whole conversation on every call, so a healthy long session reads most of it from cache. A low share means the prefix kept changing (instructions or tools edited mid-session, a model switch, a resume after the cache expired) and the same context was paid at write price again. |
 | `reread-heavy` | A session that read each cached token back far more often than it wrote one | over 100 reads per written token | Each call re-reads the full context. A ratio this high means a large context was carried through many turns after it stopped being useful; compacting or starting fresh would have cost less. |
 | `outsized-turn` | One API call that is both large and a large part of its own session | over 500k input-equivalent and at least 10% of its session | A call that size which dominates its session is usually a full cache rewrite after an idle gap, or a very large file or tool result pulled into context. The size alone is not enough: on a model with a 1M-token context, a routine full-context cache write passes 500k, and in one measured week of real logs 114 calls passed 500k, half of them under 2% of their session's weight. |
-| `session-share` | One session holding an outsized share of the window | over twice a fair share, with 5 or more judged sessions | When one session dominates a week, that session is where any saving is. A fair share is the window divided evenly among the sessions over the size floor (below); among three or four sessions a large share is just arithmetic, so the rule waits for five. |
+| `session-share` | One session holding an outsized share of the window | over twice a fair share and over 10%, with 5 or more judged sessions | When one session dominates a week, that session is where any saving is. A fair share is the window divided evenly among the sessions over the size floor (below); among three or four sessions a large share is just arithmetic, so the rule waits for five. In a busy week twice a fair share shrinks to a percent or two, which every larger session passes, so a session must also hold 10% of the window. |
 
 `low-cache-hit`, `reread-heavy` and `session-share` judge only sessions that weigh at least 1M input-equivalent tokens. A short session writes its context once and has few turns to read it back, so its ratios say nothing yet. Subagent transcripts count toward the session that started them, and the report shows what share of each session they took.
 
@@ -118,7 +118,8 @@ Every weight and threshold can be overridden from a JSON file. Keys you leave ou
     "turn_max": 500000,
     "turn_share_min": 0.10,
     "session_share_factor": 2,
-    "session_share_min_sessions": 5
+    "session_share_min_sessions": 5,
+    "session_share_min": 0.10
   }
 }
 ```

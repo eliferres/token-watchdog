@@ -87,6 +87,16 @@ class SessionShareTest(unittest.TestCase):
         self.assertEqual(flags[0]["message"],
                          "47% of the window's weighted total, over 2x a fair share of 5 sessions (40%)")
 
+    def test_a_busy_window_needs_at_least_ten_percent(self) -> None:
+        # 40 sessions put twice a fair share at 5%; the 10% floor keeps a 6% session quiet.
+        busy = [session(f"s{n}", **HEALTHY) for n in range(39)]
+        larger = session("larger", inp=20_000, write=800_000, read=40_000_000, out=60_000, largest=90_000)
+        self.assertEqual(tw.find_flags(report(larger, *busy), LIMITS), [])
+        hog = session("hog", inp=20_000, write=800_000, read=100_000_000, out=60_000, largest=90_000)
+        flags = tw.find_flags(report(hog, *busy), dict(LIMITS, reread_max=1000))
+        self.assertEqual(rules(flags), [("session-share", "hog")])
+        self.assertEqual(flags[0]["message"], "12% of the window's weighted total, over the floor (10%)")
+
     def test_three_identical_small_sessions_never_fire(self) -> None:
         trio = report(*(session(f"s{n}", inp=11_000, largest=11_000) for n in range(3)))
         self.assertEqual(tw.find_flags(trio, LIMITS), [])
