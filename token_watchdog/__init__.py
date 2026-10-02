@@ -317,7 +317,7 @@ def find_flags(report: dict, thresholds: Dict[str, float]) -> List[dict]:
         hit = cache_hit(session["tokens"])
         if hit is not None and hit < thresholds["cache_hit_min"]:
             flag("low-cache-hit", session, hit, thresholds["cache_hit_min"],
-                 f"{hit:.0%} of input came from cache, below {thresholds['cache_hit_min']:.0%}")
+                 f"{percent(hit)} of input came from cache, below {percent(thresholds['cache_hit_min'])}")
     for session in judged:
         ratio = reread_ratio(session["tokens"])
         if ratio is not None and ratio > thresholds["reread_max"]:
@@ -333,7 +333,7 @@ def find_flags(report: dict, thresholds: Dict[str, float]) -> List[dict]:
             share = session["weighted"] / total
             if share > thresholds["session_share_max"]:
                 flag("session-share", session, share, thresholds["session_share_max"],
-                     f"{share:.0%} of the window's weighted total, over {thresholds['session_share_max']:.0%}")
+                     f"{percent(share)} of the window's weighted total, over {percent(thresholds['session_share_max'])}")
     return flags
 
 
@@ -449,7 +449,8 @@ def render_text(report: dict, top: int) -> str:
 
 def percent(share: Optional[float]) -> str:
     """Round down, so a cache that missed even once never reads as 100%."""
-    return "-" if share is None else f"{math.floor(share * 100)}%"
+    # The epsilon absorbs float error: 0.29 * 100 is 28.999999999999996.
+    return "-" if share is None else f"{math.floor(share * 100 + 1e-9)}%"
 
 
 def plural(count: int, noun: str) -> str:
