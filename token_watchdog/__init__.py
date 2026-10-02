@@ -371,8 +371,11 @@ def load_config(path: Optional[str]) -> Tuple[Dict[str, float], Dict[str, float]
         for key, value in values.items():
             if key not in target:
                 raise UsageError(f"config {path}: unknown {section} key {key!r}")
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
-                raise UsageError(f"config {path}: {section}.{key} must be a number of 0 or more")
+            # json accepts NaN and Infinity; NaN compares false with everything and
+            # would silently switch a flag off, so both are refused.
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0):
+                raise UsageError(f"config {path}: {section}.{key} must be a finite number of 0 or more")
             target[key] = value
     if data:
         raise UsageError(f"config {path}: unknown key {sorted(data)[0]!r}")
@@ -383,7 +386,10 @@ def build_report(root: Path, end_day: date, days: int, weights: Dict[str, float]
                  thresholds: Dict[str, float], tz: Optional[tzinfo] = None) -> dict:
     if not root.is_dir():
         raise UsageError(f"no transcript folder at {root} (set --projects-dir or CLAUDE_CONFIG_DIR)")
-    start, end = window_bounds(end_day, days, tz)
+    try:
+        start, end = window_bounds(end_day, days, tz)
+    except (OverflowError, ValueError):
+        raise UsageError(f"a {days}-day window ending {end_day} reaches outside the calendar")
     result = scan(root, start, end)
     report = summarize(result, weights, end_day, days, tz)
     report["flags"] = find_flags(report, thresholds)
@@ -407,12 +413,12 @@ def render_text(report: dict, top: int) -> str:
     lines += [
         f"weighted {human(grand)} input-equivalent (fresh {human(t['input'])}, cache write "
         f"{human(t['cache_write'])}, cache read {human(t['cache_read'])}, output {human(t['output'])})",
-        f"cache hit {percent(cache_hit(t))}, subagents {sub / grand:.0%} of the weighted total",
+        f"cache hit {percent(cache_hit(t))}, subagents {_share(sub, grand):.0%} of the weighted total",
         "", "by project",
     ]
     width = max(len(p["label"]) for p in report["projects"])
     for p in report["projects"]:
-        lines.append(f"  {human(p['weighted']):>7}  {p['weighted'] / grand:4.0%}  {p['label']:<{width}}"
+        lines.append(f"  {human(p['weighted']):>7}  {_share(p['weighted'], grand):4.0%}  {p['label']:<{width}}"
                      f"  {plural(p['sessions'], 'session')}")
     lines += ["", "by day"]
     peak = max(d["weighted"] for d in report["days"])
@@ -425,7 +431,7 @@ def render_text(report: dict, top: int) -> str:
     for s in report["sessions"][:top]:
         hit, ratio = cache_hit(s["tokens"]), reread_ratio(s["tokens"])
         lines.append(
-            f"  {human(s['weighted']):>7}  {s['weighted'] / grand:4.0%}  {labels[s['project']]:<{width}}"
+            f"  {human(s['weighted']):>7}  {_share(s['weighted'], grand):4.0%}  {labels[s['project']]:<{width}}"
             f"  {short_id(s['session'])}  {s['turns']:>4} calls"
             f"  hit {percent(hit):>4}"
             f"  reread {'-' if ratio is None else format(ratio, '.0f') + 'x':>4}"
@@ -450,6 +456,11 @@ def percent(share: Optional[float]) -> str:
     """Round down, so a cache that missed even once never reads as 100%."""
     # The epsilon absorbs float error: 0.29 * 100 is 28.999999999999996.
     return "-" if share is None else f"{math.floor(share * 100 + 1e-9)}%"
+
+
+def _share(part: float, whole: float) -> float:
+    """part / whole, where a window of zero-usage calls has a whole of 0."""
+    return part / whole if whole else 0.0
 
 
 def plural(count: int, noun: str) -> str:
@@ -521,8 +532,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         weights, thresholds = load_config(args.config)
         root = Path(args.projects_dir).expanduser() if args.projects_dir else default_projects_dir()
         report = build_report(root, args.now or date.today(), args.days, weights, thresholds)
+        text = render_json(report) if args.json else render_text(report, args.top)
     except UsageError as exc:
         print(f"{parser.prog}: {exc}", file=sys.stderr)
         return 2
-    sys.stdout.write(render_json(report) if args.json else render_text(report, args.top))
+    except Exception as exc:  # exit 1 means "a flag fired", so a crash must never produce it
+        print(f"{parser.prog}: unexpected error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    sys.stdout.write(text)
     return 1 if report["flags"] else 0

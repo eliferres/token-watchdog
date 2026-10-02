@@ -84,7 +84,7 @@ token-watchdog [--days N] [--now YYYY-MM-DD] [--projects-dir DIR]
 | --- | --- |
 | 0 | No flag fired (an empty window also exits 0). |
 | 1 | At least one flag fired. |
-| 2 | Usage or configuration error: a bad option, an unreadable or invalid config file, a missing transcript folder. One line on stderr. |
+| 2 | Usage or configuration error: a bad option, a window reaching outside the calendar, an unreadable or invalid config file, a missing transcript folder. Also any unexpected error, so a crash can never read as a fired flag. One line on stderr. |
 
 Days are calendar days in the machine's local time zone. Set `TZ` to report in another zone, for example `TZ=UTC token-watchdog`.
 

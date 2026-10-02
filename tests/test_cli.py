@@ -95,7 +95,7 @@ class CliTest(unittest.TestCase):
     def test_config_errors_exit_2_in_one_line(self) -> None:
         cases = {
             '{"weights": {"thinking": 3}}': "unknown weights key 'thinking'",
-            '{"thresholds": {"turn_max": -1}}': "thresholds.turn_max must be a number of 0 or more",
+            '{"thresholds": {"turn_max": -1}}': "thresholds.turn_max must be a finite number of 0 or more",
             '{"limits": {}}': "unknown key 'limits'",
             "{not json": "is not valid JSON",
             "[]": "must be a JSON object",
@@ -139,6 +139,42 @@ class CliTest(unittest.TestCase):
         _, out, _ = run(*self.window, "--json")
         labels = sorted(p["label"] for p in json.loads(out)["projects"])
         self.assertEqual(labels, ["-srv-a-app", "-srv-b-app", "api"])
+
+    def test_window_of_zero_usage_calls_reports_cleanly(self) -> None:
+        empty = self.tmp / "empty"
+        write_log(empty, "-home-dev-api", "s.jsonl", [
+            assistant(f"z{n}", "2026-09-29T12:00:00Z", "s", cwd="/home/dev/api") for n in range(3)])
+        for extra in ((), ("--json",)):
+            code, out, err = run("--projects-dir", str(empty), "--now", "2026-09-30", *extra)
+            with self.subTest(extra=extra):
+                self.assertEqual((code, err), (0, ""))
+        self.assertIn("weighted 0 input-equivalent", run("--projects-dir", str(empty), "--now", "2026-09-30")[1])
+
+    def test_window_outside_the_calendar_exits_2(self) -> None:
+        for argv in (("--days", "800000"), ("--now", "9999-12-31"), ("--now", "0001-01-01", "--days", "2")):
+            code, out, err = run(*self.window[:2], *argv)
+            with self.subTest(argv=argv):
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn("outside the calendar", err)
+                self.assertEqual(err.count("\n"), 1)
+
+    def test_non_finite_config_numbers_exit_2(self) -> None:
+        config = self.tmp / "nan.json"
+        for text in ('{"thresholds": {"cache_hit_min": NaN}}', '{"weights": {"output": Infinity}}'):
+            config.write_text(text)
+            code, _, err = run(*self.window, "--config", str(config))
+            with self.subTest(text=text):
+                self.assertEqual(code, 2)
+                self.assertIn("must be a finite number of 0 or more", err)
+
+    def test_an_unexpected_error_exits_2_in_one_line_never_1(self) -> None:
+        with mock.patch.object(tw, "scan", side_effect=RuntimeError("boom")):
+            code, out, err = run(*self.window)
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(err, "token-watchdog: unexpected error: RuntimeError: boom\n")
+        with mock.patch.object(tw, "render_text", side_effect=KeyError("days")):
+            code, out, err = run(*self.window)
+        self.assertEqual((code, out, err), (2, "", "token-watchdog: unexpected error: KeyError: 'days'\n"))
 
     def test_version_and_module_entry_point(self) -> None:
         proc = subprocess.run([sys.executable, "-m", "token_watchdog", "--version"], cwd=str(ROOT),
