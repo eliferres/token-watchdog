@@ -1,0 +1,22 @@
+[
+  {
+    "cmd": "python3 -m token_watchdog --projects-dir demo/projects --now 2026-09-30 --days 3 --top 2; echo \"exit $?\"",
+    "out": "token-watchdog: 3 days to 2026-09-30, 3 projects, 4 sessions, 177 calls\nweighted 5.3M input-equivalent (fresh 30k, cache write 1.4M, cache read 29.0M, output 142k)\ncache hit 95%, subagents 0% of the weighted total\n\nby project\n     2.7M   51%  billing-api    1 session\n     1.5M   28%  docs-site      2 sessions\n     1.1M   21%  infra-scripts  1 session\n\nby day\n  2026-09-28 Mon     2.5M  ###################\n  2026-09-29 Tue     2.6M  ####################\n  2026-09-30 Wed     283k  ##\n\ntop sessions (2 of 4)\n     2.7M   51%  billing-api    7be41d09   120 calls  hit  99%  reread 201x  subagents 0%\n     1.2M   23%  docs-site      c81d5e44    20 calls  hit  56%  reread   1x  subagents 0%\n\nflags\n  low-cache-hit  docs-site c81d5e44\n                 56% of input came from cache, below 80%\n  reread-heavy   billing-api 7be41d09\n                 each cached token was read back 201 times, over 100\n  outsized-turn  infra-scripts e09b6d12\n                 one call weighed 533k, over 500k\n  session-share  billing-api 7be41d09\n                 51% of the window's weighted total, over 25%\n\nskipped 1 malformed line in 1 file\nFLAGGED: 4 flags in 3 sessions\nexit 1",
+    "status": 0
+  },
+  {
+    "cmd": "python3 -m token_watchdog --projects-dir demo/projects --now 2026-09-30 --json | grep '\"rule\"'",
+    "out": "      \"rule\": \"low-cache-hit\",\n      \"rule\": \"reread-heavy\",\n      \"rule\": \"outsized-turn\",\n      \"rule\": \"session-share\",",
+    "status": 0
+  },
+  {
+    "cmd": "python3 -m token_watchdog --projects-dir demo/healthy --now 2026-09-30 --days 3; echo \"exit $?\"",
+    "out": "token-watchdog: 3 days to 2026-09-30, 2 projects, 2 sessions, 130 calls\nweighted 1.7M input-equivalent (fresh 390, cache write 205k, cache read 8.4M, output 117k)\ncache hit 97%, subagents 0% of the weighted total\n\nby project\n     1.3M   78%  billing-api  1 session\n     372k   22%  docs-site    1 session\n\nby day\n  2026-09-28 Mon     653k  ####################\n  2026-09-29 Tue     659k  ####################\n  2026-09-30 Wed     372k  ###########\n\ntop sessions (2 of 2)\n     1.3M   78%  billing-api  4d2e8f61   100 calls  hit  97%  reread  47x  subagents 0%\n     372k   22%  docs-site    9f13ab5c    30 calls  hit  96%  reread  27x  subagents 0%\n\nCLEAN: no flags\nexit 0",
+    "status": 0
+  },
+  {
+    "cmd": "python3 -m token_watchdog --version",
+    "out": "token-watchdog 0.1.0",
+    "status": 0
+  }
+]
