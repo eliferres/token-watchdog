@@ -15,4 +15,4 @@ All notable changes to this project are documented in this file. The format is b
 - JSON config file for weights and thresholds, with unknown keys and non-finite numbers rejected.
 - Streamed replies, and messages that appear in more than one transcript file, are counted once.
 - Subagent usage is credited to the session that started it.
-- Malformed transcript lines are counted and skipped.
+- Malformed transcript lines and unreadable files are counted, skipped and reported.

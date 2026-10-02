@@ -132,7 +132,7 @@ The weights turn four kinds of token into one number, counted in fresh input tok
 
 **Subagents roll up.** A subagent's transcript lives in `<session>/subagents/` and carries its parent's session id. Its calls count toward the parent, marked as subagent work, because the parent is the session you would change.
 
-**Damaged lines are counted, not fatal.** A line cut short by a crash, or anything that is not a JSON object with numeric usage, is skipped and reported as a count. The audit never stops on one bad file.
+**Damaged lines are counted, not fatal.** A line cut short by a crash, or anything that is not a JSON object with numeric usage, is skipped and reported as a count, and so is a file that cannot be opened. The audit never stops on one bad file.
 
 **Whole local days.** The window runs from midnight to midnight in the local zone, and each call is bucketed by its own local date, so a week that crosses a daylight-saving change still has seven correct days. Python 3.9's timestamp parser rejects a trailing `Z` and fractions that are not three or six digits long; both are normalized before parsing.
 

@@ -126,6 +126,24 @@ class CliTest(unittest.TestCase):
         _, out, _ = run(*self.window)
         self.assertIn("skipped 1 malformed line in 1 file\n", out)
 
+    def test_unreadable_files_are_counted_and_reported(self) -> None:
+        locked = write_log(self.logs, "-home-dev-api", "locked.jsonl",
+                           [assistant("x1", "2026-09-29T12:00:00Z", "locked", inp=1)])
+        real_open = Path.open
+
+        def refuse(path, *args, **kwargs):
+            if path == locked:
+                raise PermissionError(13, "Permission denied")
+            return real_open(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "open", autospec=True, side_effect=refuse):
+            code, out, _ = run(*self.window)
+            _, data, _ = run(*self.window, "--json")
+        self.assertEqual(code, 0)
+        self.assertIn("4 calls", out)
+        self.assertIn("skipped 1 unreadable file\n", out)
+        self.assertEqual(json.loads(data)["unreadable_files"], 1)
+
     def test_config_dir_variable_finds_the_logs(self) -> None:
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.tmp)}):
             code, out, _ = run("--now", "2026-09-30")

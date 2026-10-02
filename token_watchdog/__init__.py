@@ -75,6 +75,7 @@ class Scan:
     files_read: int = 0
     malformed_lines: int = 0
     malformed_files: int = 0
+    unreadable_files: int = 0
     labels: Dict[str, str] = field(default_factory=dict)  # project dir -> readable name
 
 
@@ -165,7 +166,8 @@ def scan(root: Path, start: datetime, end: datetime) -> Scan:
             if path.stat().st_mtime < floor:
                 continue  # last written before the window opened
             handle = path.open(encoding="utf-8", errors="replace")
-        except OSError:
+        except OSError:  # unreadable, or deleted since the listing
+            result.unreadable_files += 1
             continue
         result.files_read += 1
         bad_before = result.malformed_lines
@@ -397,6 +399,7 @@ def build_report(root: Path, end_day: date, days: int, weights: Dict[str, float]
     report["window"] = {"first_day": report["days"][0]["day"], "last_day": end_day.isoformat(), "days": days}
     report["files_read"] = result.files_read
     report["malformed"] = {"lines": result.malformed_lines, "files": result.malformed_files}
+    report["unreadable_files"] = result.unreadable_files
     report["weights"], report["thresholds"] = weights, thresholds
     return report
 
@@ -408,7 +411,7 @@ def render_text(report: dict, top: int) -> str:
              f"{plural(total['turns'], 'call')}"]
     if not total["turns"]:
         lines.append("no API calls in this window")
-        return "\n".join(lines + _malformed_note(report)) + "\n"
+        return "\n".join(lines + _skipped_notes(report)) + "\n"
     t, grand = total["tokens"], total["weighted"]
     sub = sum(s["subagent_weighted"] for s in report["sessions"])
     lines += [
@@ -446,7 +449,7 @@ def render_text(report: dict, top: int) -> str:
             lines.append(f"  {f['rule']:<{rule_width}}  {f['label']} {short_id(f['session'])}")
             lines.append(f"  {'':<{rule_width}}  {f['message']}")
         lines.append("")
-    lines += _malformed_note(report)
+    lines += _skipped_notes(report)
     flagged = len({(f["project"], f["session"]) for f in flags})
     lines.append(f"FLAGGED: {plural(len(flags), 'flag')} in {plural(flagged, 'session')}"
                  if flags else "CLEAN: no flags")
@@ -468,11 +471,14 @@ def plural(count: int, noun: str) -> str:
     return f"{count} {noun}{'' if count == 1 else 's'}"
 
 
-def _malformed_note(report: dict) -> List[str]:
+def _skipped_notes(report: dict) -> List[str]:
+    notes = []
     bad = report["malformed"]
-    if not bad["lines"]:
-        return []
-    return [f"skipped {plural(bad['lines'], 'malformed line')} in {plural(bad['files'], 'file')}"]
+    if bad["lines"]:
+        notes.append(f"skipped {plural(bad['lines'], 'malformed line')} in {plural(bad['files'], 'file')}")
+    if report["unreadable_files"]:
+        notes.append(f"skipped {plural(report['unreadable_files'], 'unreadable file')}")
+    return notes
 
 
 def render_json(report: dict) -> str:
