@@ -50,6 +50,7 @@ USAGE_FIELDS = (
 
 _FRACTION = re.compile(r"\.(\d+)")
 _NON_NAME = re.compile(r"[^A-Za-z0-9-]")
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
 @dataclass
@@ -395,8 +396,9 @@ def build_report(root: Path, end_day: date, days: int, weights: Dict[str, float]
 
 def render_text(report: dict, top: int) -> str:
     total, window = report["total"], report["window"]
-    lines = [f"token-watchdog: {window['days']} days to {window['last_day']}, "
-             f"{len(report['projects'])} projects, {len(report['sessions'])} sessions, {total['turns']} calls"]
+    lines = [f"token-watchdog: {plural(window['days'], 'day')} to {window['last_day']}, "
+             f"{plural(len(report['projects']), 'project')}, {plural(len(report['sessions']), 'session')}, "
+             f"{plural(total['turns'], 'call')}"]
     if not total["turns"]:
         lines.append("no API calls in this window")
         return "\n".join(lines + _malformed_note(report)) + "\n"
@@ -411,12 +413,12 @@ def render_text(report: dict, top: int) -> str:
     width = max(len(p["label"]) for p in report["projects"])
     for p in report["projects"]:
         lines.append(f"  {human(p['weighted']):>7}  {p['weighted'] / grand:4.0%}  {p['label']:<{width}}"
-                     f"  {p['sessions']} session{'s' if p['sessions'] != 1 else ''}")
+                     f"  {plural(p['sessions'], 'session')}")
     lines += ["", "by day"]
     peak = max(d["weighted"] for d in report["days"])
     for d in report["days"]:
         bar = "#" * round(20 * d["weighted"] / peak) if peak else ""
-        weekday = date.fromisoformat(d["day"]).strftime("%a")
+        weekday = WEEKDAYS[date.fromisoformat(d["day"]).weekday()]  # not strftime: locale-free
         lines.append(f"  {d['day']} {weekday}  {human(d['weighted']):>7}  {bar}".rstrip())
     lines += ["", f"top sessions ({min(top, len(report['sessions']))} of {len(report['sessions'])})"]
     labels = {p["project"]: p["label"] for p in report["projects"]}
@@ -438,17 +440,20 @@ def render_text(report: dict, top: int) -> str:
         lines.append("")
     lines += _malformed_note(report)
     flagged = len({(f["project"], f["session"]) for f in flags})
-    lines.append(f"FLAGGED: {len(flags)} flag{'s' if len(flags) != 1 else ''} in {flagged} "
-                 f"session{'s' if flagged != 1 else ''}" if flags else "CLEAN: no flags")
+    lines.append(f"FLAGGED: {plural(len(flags), 'flag')} in {plural(flagged, 'session')}"
+                 if flags else "CLEAN: no flags")
     return "\n".join(lines) + "\n"
+
+
+def plural(count: int, noun: str) -> str:
+    return f"{count} {noun}{'' if count == 1 else 's'}"
 
 
 def _malformed_note(report: dict) -> List[str]:
     bad = report["malformed"]
     if not bad["lines"]:
         return []
-    return [f"skipped {bad['lines']} malformed line{'s' if bad['lines'] != 1 else ''} "
-            f"in {bad['files']} file{'s' if bad['files'] != 1 else ''}"]
+    return [f"skipped {plural(bad['lines'], 'malformed line')} in {plural(bad['files'], 'file')}"]
 
 
 def render_json(report: dict) -> str:

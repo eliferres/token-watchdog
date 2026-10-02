@@ -50,7 +50,7 @@ class CliTest(unittest.TestCase):
     def test_clean_window_exits_0(self) -> None:
         code, out, err = run(*self.window)
         self.assertEqual((code, err), (0, ""))
-        self.assertTrue(out.startswith("token-watchdog: 7 days to 2026-09-30, 1 projects, 1 sessions, 4 calls\n"))
+        self.assertTrue(out.startswith("token-watchdog: 7 days to 2026-09-30, 1 project, 1 session, 4 calls\n"))
         self.assertIn("cache hit 95%", out)
         self.assertTrue(out.endswith("CLEAN: no flags\n"))
 
@@ -74,7 +74,7 @@ class CliTest(unittest.TestCase):
     def test_days_and_top_shape_the_report(self) -> None:
         self.add_spike()
         _, out, _ = run(*self.window, "--days", "2", "--top", "1")
-        self.assertIn("2 days to 2026-09-30, 1 projects, 1 sessions, 1 calls", out)
+        self.assertIn("2 days to 2026-09-30, 1 project, 1 session, 1 call", out)
         self.assertIn("top sessions (1 of 1)", out)
 
     def test_empty_window_is_clean(self) -> None:
