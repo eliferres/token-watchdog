@@ -7,7 +7,7 @@ Reads the session logs Claude Code keeps on your machine and tells you which ses
 ![python](https://img.shields.io/badge/python-3.9%2B-blue.svg)
 ![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
 
-<img src="demo/terminal.svg" width="660" alt="Terminal session showing token-watchdog reading three days of synthetic Claude Code logs: a weighted total of 5.3M split by project, day and session, then four flags (a 56% cache hit, a context read back 201 times, one 533k call, one session holding 51% of the window), one skipped malformed line, and exit 1.">
+<img src="demo/terminal.svg" width="660" alt="Terminal session showing token-watchdog reading three days of synthetic Claude Code logs: a weighted total of 9.7M split by project, day and session, then four flags (a 56% cache hit, a context read back 201 times, one 533k call, one session holding 46% of the window), one skipped malformed line, and exit 1.">
 
 ## Ten seconds
 
@@ -35,7 +35,7 @@ weighted 1.7M input-equivalent (fresh 390, cache write 205k, cache read 8.4M, ou
 cache hit 97%, subagents 0% of the weighted total
 
 by project
-     1.3M   78%  billing-api  1 session
+     1.3M   77%  billing-api  1 session
      372k   22%  docs-site    1 session
 
 by day
@@ -44,7 +44,7 @@ by day
   2026-09-30 Wed     372k  ###########
 
 top sessions (2 of 2)
-     1.3M   78%  billing-api  4d2e8f61   100 calls  hit  97%  reread  47x  subagents 0%
+     1.3M   77%  billing-api  4d2e8f61   100 calls  hit  97%  reread  47x  subagents 0%
      372k   22%  docs-site    9f13ab5c    30 calls  hit  96%  reread  27x  subagents 0%
 
 CLEAN: no flags
@@ -60,9 +60,9 @@ Every output in this README and in the picture comes from `demo/transcript.json`
 | `low-cache-hit` | A session where a small share of input came from the prompt cache | under 80% | Claude Code re-sends the whole conversation on every call, so a healthy long session reads most of it from cache. A low share means the prefix kept changing (instructions or tools edited mid-session, a model switch, a resume after the cache expired) and the same context was paid at write price again. |
 | `reread-heavy` | A session that read each cached token back far more often than it wrote one | over 100 reads per written token | Each call re-reads the full context. A ratio this high means a large context was carried through many turns after it stopped being useful; compacting or starting fresh would have cost less. |
 | `outsized-turn` | One API call that weighed more than a threshold | over 500k input-equivalent | One call at this size is usually a full cache rewrite after an idle gap, or a very large file or tool result pulled into context. |
-| `session-share` | One session holding an outsized share of the window | over 25%, with 3 or more sessions | When one session dominates a week, that session is where any saving is. With one or two sessions the share is meaningless, so the rule waits for three. |
+| `session-share` | One session holding an outsized share of the window | over twice a fair share, with 5 or more judged sessions | When one session dominates a week, that session is where any saving is. A fair share is the window divided evenly among the sessions over the size floor (below); among three or four sessions a large share is just arithmetic, so the rule waits for five. |
 
-`low-cache-hit` and `reread-heavy` judge only sessions that weigh at least 1M input-equivalent tokens. A short session writes its context once and has few turns to read it back, so its ratios say nothing yet. Subagent transcripts count toward the session that started them, and the report shows what share of each session they took.
+`low-cache-hit`, `reread-heavy` and `session-share` judge only sessions that weigh at least 1M input-equivalent tokens. A short session writes its context once and has few turns to read it back, so its ratios say nothing yet. Subagent transcripts count toward the session that started them, and the report shows what share of each session they took.
 
 ## Running it
 
@@ -116,8 +116,8 @@ Every weight and threshold can be overridden from a JSON file. Keys you leave ou
     "cache_hit_min": 0.80,
     "reread_max": 100,
     "turn_max": 500000,
-    "session_share_max": 0.25,
-    "session_share_min_sessions": 3
+    "session_share_factor": 2,
+    "session_share_min_sessions": 5
   }
 }
 ```

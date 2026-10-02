@@ -67,17 +67,26 @@ class OutsizedTurnTest(unittest.TestCase):
 
 
 class SessionShareTest(unittest.TestCase):
-    def test_fires_when_one_session_dominates_the_window(self) -> None:
-        big = session("big", **HEALTHY)
-        small = [session(f"s{n}", inp=1_000, largest=1_000) for n in range(3)]
-        self.assertEqual(rules(tw.find_flags(report(big, *small), LIMITS)), [("session-share", "big")])
+    def test_fires_past_twice_a_fair_share_among_five_judged_sessions(self) -> None:
+        big = session("big", inp=20_000, write=800_000, read=60_000_000, out=60_000, largest=90_000)  # 7.3M
+        others = [session(f"s{n}", **HEALTHY) for n in range(4)]  # 2.0M each
+        flags = tw.find_flags(report(big, *others), LIMITS)
+        self.assertEqual(rules(flags), [("session-share", "big")])
+        self.assertEqual(flags[0]["message"],
+                         "47% of the window's weighted total, over 2x a fair share of 5 sessions (40%)")
 
-    def test_needs_enough_sessions_to_mean_anything(self) -> None:
-        pair = report(session("a", **HEALTHY), session("b", inp=1_000, largest=1_000))
-        self.assertEqual(tw.find_flags(pair, LIMITS), [])
+    def test_three_identical_small_sessions_never_fire(self) -> None:
+        trio = report(*(session(f"s{n}", inp=11_000, largest=11_000) for n in range(3)))
+        self.assertEqual(tw.find_flags(trio, LIMITS), [])
+
+    def test_needs_five_sessions_over_the_size_floor(self) -> None:
+        big = session("big", inp=20_000, write=800_000, read=60_000_000, out=60_000, largest=90_000)
+        small = [session(f"t{n}", inp=1_000, largest=1_000) for n in range(20)]
+        three = [session(f"s{n}", **HEALTHY) for n in range(3)]
+        self.assertEqual(tw.find_flags(report(big, *three, *small), LIMITS), [])
 
     def test_quiet_when_usage_is_spread(self) -> None:
-        even = report(*(session(f"s{n}", **HEALTHY) for n in range(4)))
+        even = report(*(session(f"s{n}", **HEALTHY) for n in range(6)))
         self.assertEqual(tw.find_flags(even, LIMITS), [])
 
 

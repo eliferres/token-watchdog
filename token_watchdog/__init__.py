@@ -38,9 +38,11 @@ DEFAULT_THRESHOLDS = {
     "cache_hit_min": 0.80,
     "reread_max": 100.0,
     "turn_max": 500_000,
-    "session_share_max": 0.25,
-    # With one or two sessions in the window, one of them always holds a big share.
-    "session_share_min_sessions": 3,
+    # A session is flagged past this many times its fair share (1/N of the window,
+    # N = sessions over min_session_weighted), and only when N is at least the
+    # minimum below: among three or four sessions a big share is arithmetic.
+    "session_share_factor": 2.0,
+    "session_share_min_sessions": 5,
 }
 
 USAGE_FIELDS = (
@@ -349,12 +351,14 @@ def find_flags(report: dict, thresholds: Dict[str, float]) -> List[dict]:
             flag("outsized-turn", session, session["largest_turn"], thresholds["turn_max"],
                  f"one call weighed {human(session['largest_turn'])}, over {human(thresholds['turn_max'])}")
     total = report["total"]["weighted"]
-    if total and len(report["sessions"]) >= thresholds["session_share_min_sessions"]:
-        for session in report["sessions"]:
+    if total and judged and len(judged) >= thresholds["session_share_min_sessions"]:
+        limit = thresholds["session_share_factor"] / len(judged)
+        for session in judged:
             share = session["weighted"] / total
-            if share > thresholds["session_share_max"]:
-                flag("session-share", session, share, thresholds["session_share_max"],
-                     f"{percent(share)} of the window's weighted total, over {percent(thresholds['session_share_max'])}")
+            if share > limit:
+                flag("session-share", session, share, limit,
+                     f"{percent(share)} of the window's weighted total, over "
+                     f"{thresholds['session_share_factor']:g}x a fair share of {len(judged)} sessions ({percent(limit)})")
     return flags
 
 
@@ -436,12 +440,12 @@ def render_text(report: dict, top: int) -> str:
     lines += [
         f"weighted {human(grand)} input-equivalent (fresh {human(t['input'])}, cache write "
         f"{human(cache_writes(t))}, cache read {human(t['cache_read'])}, output {human(t['output'])})",
-        f"cache hit {percent(cache_hit(t))}, subagents {_share(sub, grand):.0%} of the weighted total",
+        f"cache hit {percent(cache_hit(t))}, subagents {percent(_share(sub, grand))} of the weighted total",
         "", "by project",
     ]
     width = max(len(p["label"]) for p in report["projects"])
     for p in report["projects"]:
-        lines.append(f"  {human(p['weighted']):>7}  {_share(p['weighted'], grand):4.0%}  {p['label']:<{width}}"
+        lines.append(f"  {human(p['weighted']):>7}  {percent(_share(p['weighted'], grand)):>4}  {p['label']:<{width}}"
                      f"  {plural(p['sessions'], 'session')}")
     lines += ["", "by day"]
     peak = max(d["weighted"] for d in report["days"])
@@ -454,11 +458,11 @@ def render_text(report: dict, top: int) -> str:
     for s in report["sessions"][:top]:
         hit, ratio = cache_hit(s["tokens"]), reread_ratio(s["tokens"])
         lines.append(
-            f"  {human(s['weighted']):>7}  {_share(s['weighted'], grand):4.0%}  {labels[s['project']]:<{width}}"
+            f"  {human(s['weighted']):>7}  {percent(_share(s['weighted'], grand)):>4}  {labels[s['project']]:<{width}}"
             f"  {short_id(s['session'])}  {s['turns']:>4} calls"
             f"  hit {percent(hit):>4}"
             f"  reread {'-' if ratio is None else format(ratio, '.0f') + 'x':>4}"
-            f"  subagents {s['subagent_weighted'] / s['weighted'] if s['weighted'] else 0:.0%}")
+            f"  subagents {percent(_share(s['subagent_weighted'], s['weighted']))}")
     lines.append("")
     flags = report["flags"]
     if flags:
