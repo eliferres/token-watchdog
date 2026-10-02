@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "token-watchdog"
+dynamic = ["version"]
+description = "Find the Claude Code sessions that burn tokens wastefully, and say why"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "Eli Ferres" }]
+
+[project.urls]
+Source = "https://github.com/eliferres/token-watchdog"
+Changelog = "https://github.com/eliferres/token-watchdog/blob/main/CHANGELOG.md"
+
+[project.scripts]
+token-watchdog = "token_watchdog:main"
+
+[tool.setuptools]
+packages = ["token_watchdog"]
+
+[tool.setuptools.dynamic]
+version = { attr = "token_watchdog.__version__" }
