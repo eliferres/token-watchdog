@@ -112,6 +112,12 @@ class ScanTest(unittest.TestCase):
                   [assistant("m1", "2026-09-29T09:00:00Z", "s", inp=1, cwd="/home/dev/api")])
         self.assertEqual(scan_window(self.root).labels, {"-home-dev-api": "api"})
 
+    def test_project_label_prefers_the_directory_the_session_started_in(self) -> None:
+        write_log(self.root, "-home-dev-api", "s.jsonl", [
+            assistant("m1", "2026-09-29T09:00:00Z", "s", inp=1, cwd="/home/dev/api/docs"),
+            assistant("m2", "2026-09-29T09:01:00Z", "s", inp=1, cwd="/home/dev/api")])
+        self.assertEqual(scan_window(self.root).labels, {"-home-dev-api": "api"})
+
 
 class WeightsAndRatiosTest(unittest.TestCase):
     def test_default_weights_follow_price_ratios(self) -> None:

@@ -8,13 +8,15 @@ and day.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 __version__ = "0.1.0"
 
@@ -47,6 +49,7 @@ USAGE_FIELDS = (
 )
 
 _FRACTION = re.compile(r"\.(\d+)")
+_NON_NAME = re.compile(r"[^A-Za-z0-9-]")
 
 
 @dataclass
@@ -178,9 +181,7 @@ def scan(root: Path, start: datetime, end: datetime) -> Scan:
                     result.malformed_lines += 1
                     continue
                 project, session, sidechain = _project_and_session(root, path, entry)
-                cwd = entry.get("cwd")
-                if isinstance(cwd, str) and cwd:
-                    result.labels.setdefault(project, Path(cwd).name or cwd)
+                _note_label(result.labels, project, entry.get("cwd"))
                 message = entry.get("message")
                 if not isinstance(message, dict) or "usage" not in message:
                     continue
@@ -201,6 +202,22 @@ def scan(root: Path, start: datetime, end: datetime) -> Scan:
             result.malformed_files += 1
     result.turns = sorted(list(by_id.values()) + loose, key=lambda t: t.owner)
     return result
+
+
+def _note_label(labels: Dict[str, str], project: str, cwd: object) -> None:
+    """Name a project folder after the directory Claude Code was started in.
+
+    The folder name is that directory with every character other than a letter,
+    digit or dash replaced by a dash. A session can cd elsewhere, so a working
+    directory that encodes to the folder name wins over the first one seen.
+    """
+    if not isinstance(cwd, str) or not cwd:
+        return
+    name = Path(cwd).name or cwd
+    if _NON_NAME.sub("-", cwd) == project:
+        labels[project] = name
+    else:
+        labels.setdefault(project, name)
 
 
 def _merge(by_id: Dict[str, Turn], key: str, turn: Turn) -> None:
@@ -267,8 +284,11 @@ def summarize(result: Scan, weights: Dict[str, float], end_day: date, days_in_wi
         session.update(project=project, session=session_id)
         projects[project].setdefault("sessions", 0)
         projects[project]["sessions"] += 1
+    readable = [result.labels.get(project, project) for project in projects]
     for project, bucket in projects.items():
-        bucket.update(project=project, label=result.labels.get(project, project))
+        label = result.labels.get(project, project)
+        # Two folders with the same last path component would print identically.
+        bucket.update(project=project, label=label if readable.count(label) == 1 else project)
     return {
         "total": total,
         "projects": sorted(projects.values(), key=lambda b: (-b["weighted"], b["project"])),
@@ -316,9 +336,181 @@ def find_flags(report: dict, thresholds: Dict[str, float]) -> List[dict]:
 
 
 def human(count: float) -> str:
-    """Token counts the way people say them: 950, 12k, 3.4M."""
+    """Token counts the way people say them: 950, 12k, 3.4M, 1.2B."""
+    if count >= 1e9:
+        return f"{count / 1e9:.1f}B"
     if count >= 1e6:
         return f"{count / 1e6:.1f}M"
     if count >= 1e3:
         return f"{count / 1e3:.0f}k"
     return f"{count:.0f}"
+
+
+class UsageError(Exception):
+    """A bad flag, config file or folder: reported in one line, exit 2."""
+
+
+def load_config(path: Optional[str]) -> Tuple[Dict[str, float], Dict[str, float]]:
+    """Defaults, overridden by a JSON file of the form {"weights": {...}, "thresholds": {...}}."""
+    weights, thresholds = dict(DEFAULT_WEIGHTS), dict(DEFAULT_THRESHOLDS)
+    if path is None:
+        return weights, thresholds
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise UsageError(f"cannot read config {path}: {exc.strerror}")
+    except ValueError as exc:
+        raise UsageError(f"config {path} is not valid JSON: {exc}")
+    if not isinstance(data, dict):
+        raise UsageError(f"config {path} must be a JSON object")
+    for section, target in (("weights", weights), ("thresholds", thresholds)):
+        values = data.pop(section, {})
+        if not isinstance(values, dict):
+            raise UsageError(f"config {path}: {section} must be an object")
+        for key, value in values.items():
+            if key not in target:
+                raise UsageError(f"config {path}: unknown {section} key {key!r}")
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+                raise UsageError(f"config {path}: {section}.{key} must be a number of 0 or more")
+            target[key] = value
+    if data:
+        raise UsageError(f"config {path}: unknown key {sorted(data)[0]!r}")
+    return weights, thresholds
+
+
+def build_report(root: Path, end_day: date, days: int, weights: Dict[str, float],
+                 thresholds: Dict[str, float], tz: Optional[tzinfo] = None) -> dict:
+    if not root.is_dir():
+        raise UsageError(f"no transcript folder at {root} (set --projects-dir or CLAUDE_CONFIG_DIR)")
+    start, end = window_bounds(end_day, days, tz)
+    result = scan(root, start, end)
+    report = summarize(result, weights, end_day, days, tz)
+    report["flags"] = find_flags(report, thresholds)
+    report["window"] = {"first_day": report["days"][0]["day"], "last_day": end_day.isoformat(), "days": days}
+    report["files_read"] = result.files_read
+    report["malformed"] = {"lines": result.malformed_lines, "files": result.malformed_files}
+    report["weights"], report["thresholds"] = weights, thresholds
+    return report
+
+
+def render_text(report: dict, top: int) -> str:
+    total, window = report["total"], report["window"]
+    lines = [f"token-watchdog: {window['days']} days to {window['last_day']}, "
+             f"{len(report['projects'])} projects, {len(report['sessions'])} sessions, {total['turns']} calls"]
+    if not total["turns"]:
+        lines.append("no API calls in this window")
+        return "\n".join(lines + _malformed_note(report)) + "\n"
+    t, grand = total["tokens"], total["weighted"]
+    sub = sum(s["subagent_weighted"] for s in report["sessions"])
+    lines += [
+        f"weighted {human(grand)} input-equivalent (fresh {human(t['input'])}, cache write "
+        f"{human(t['cache_write'])}, cache read {human(t['cache_read'])}, output {human(t['output'])})",
+        f"cache hit {cache_hit(t):.0%}, subagents {sub / grand:.0%} of the weighted total",
+        "", "by project",
+    ]
+    width = max(len(p["label"]) for p in report["projects"])
+    for p in report["projects"]:
+        lines.append(f"  {human(p['weighted']):>7}  {p['weighted'] / grand:4.0%}  {p['label']:<{width}}"
+                     f"  {p['sessions']} session{'s' if p['sessions'] != 1 else ''}")
+    lines += ["", "by day"]
+    peak = max(d["weighted"] for d in report["days"])
+    for d in report["days"]:
+        bar = "#" * round(20 * d["weighted"] / peak) if peak else ""
+        weekday = date.fromisoformat(d["day"]).strftime("%a")
+        lines.append(f"  {d['day']} {weekday}  {human(d['weighted']):>7}  {bar}".rstrip())
+    lines += ["", f"top sessions ({min(top, len(report['sessions']))} of {len(report['sessions'])})"]
+    labels = {p["project"]: p["label"] for p in report["projects"]}
+    for s in report["sessions"][:top]:
+        hit, ratio = cache_hit(s["tokens"]), reread_ratio(s["tokens"])
+        lines.append(
+            f"  {human(s['weighted']):>7}  {s['weighted'] / grand:4.0%}  {labels[s['project']]:<{width}}"
+            f"  {short_id(s['session'])}  {s['turns']:>4} calls"
+            f"  hit {'-' if hit is None else format(hit, '.0%'):>4}"
+            f"  reread {'-' if ratio is None else format(ratio, '.0f') + 'x':>4}"
+            f"  subagents {s['subagent_weighted'] / s['weighted'] if s['weighted'] else 0:.0%}")
+    lines.append("")
+    flags = report["flags"]
+    if flags:
+        lines.append("flags")
+        rule_width = max(len(f["rule"]) for f in flags)
+        for f in flags:
+            lines.append(f"  {f['rule']:<{rule_width}}  {f['label']} {short_id(f['session'])}: {f['message']}")
+        lines.append("")
+    lines += _malformed_note(report)
+    flagged = len({(f["project"], f["session"]) for f in flags})
+    lines.append(f"FLAGGED: {len(flags)} flag{'s' if len(flags) != 1 else ''} in {flagged} "
+                 f"session{'s' if flagged != 1 else ''}" if flags else "CLEAN: no flags")
+    return "\n".join(lines) + "\n"
+
+
+def _malformed_note(report: dict) -> List[str]:
+    bad = report["malformed"]
+    if not bad["lines"]:
+        return []
+    return [f"skipped {bad['lines']} malformed line{'s' if bad['lines'] != 1 else ''} "
+            f"in {bad['files']} file{'s' if bad['files'] != 1 else ''}"]
+
+
+def render_json(report: dict) -> str:
+    def rounded(value: object) -> object:
+        if isinstance(value, float):
+            return round(value, 4) if value < 1 else round(value, 1)
+        if isinstance(value, dict):
+            return {k: rounded(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [rounded(v) for v in value]
+        return value
+
+    out = dict(report, tool="token-watchdog", version=__version__)
+    out["total"] = dict(report["total"], cache_hit=cache_hit(report["total"]["tokens"]))
+    out["sessions"] = [dict(s, cache_hit=cache_hit(s["tokens"]), reread_ratio=reread_ratio(s["tokens"]))
+                       for s in report["sessions"]]
+    return json.dumps(rounded(out), indent=2) + "\n"
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:  # one line on stderr, exit 2, no usage dump
+        self.exit(2, f"{self.prog}: {message}\n")
+
+
+def _positive_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"expected a whole number of 1 or more, got {text!r}")
+    return value
+
+
+def _day(text: str) -> date:
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a date as YYYY-MM-DD, got {text!r}")
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = _Parser(
+        prog="token-watchdog",
+        description="Audit Claude Code session logs for wasteful token use. "
+                    "Exit 0 when no flag fires, 1 when one does, 2 on a usage or config error.")
+    parser.add_argument("--days", type=_positive_int, default=7, help="calendar days in the window (default 7)")
+    parser.add_argument("--now", type=_day, metavar="YYYY-MM-DD",
+                        help="last day of the window, in local time (default today)")
+    parser.add_argument("--projects-dir", metavar="DIR",
+                        help="transcript folder (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
+    parser.add_argument("--config", metavar="FILE", help="JSON file overriding weights and thresholds")
+    parser.add_argument("--top", type=_positive_int, default=5, help="sessions to list (default 5)")
+    parser.add_argument("--json", action="store_true", help="print the full report as JSON")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    args = parser.parse_args(argv)
+    try:
+        weights, thresholds = load_config(args.config)
+        root = Path(args.projects_dir).expanduser() if args.projects_dir else default_projects_dir()
+        report = build_report(root, args.now or date.today(), args.days, weights, thresholds)
+    except UsageError as exc:
+        print(f"{parser.prog}: {exc}", file=sys.stderr)
+        return 2
+    sys.stdout.write(render_json(report) if args.json else render_text(report, args.top))
+    return 1 if report["flags"] else 0
