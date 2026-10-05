@@ -97,6 +97,14 @@ class SessionShareTest(unittest.TestCase):
         self.assertEqual(rules(flags), [("session-share", "hog")])
         self.assertEqual(flags[0]["message"], "12% of the window's weighted total, over the floor (10%)")
 
+    def test_share_and_line_that_round_alike_get_a_decimal(self) -> None:
+        busy = [session(f"s{n}", **HEALTHY) for n in range(39)]
+        edge = session("edge", inp=20_000, write=800_000, read=78_000_000, out=60_000, largest=90_000)
+        flags = tw.find_flags(report(edge, *busy), dict(LIMITS, reread_max=1000))
+        share = edge["weighted"] / sum(s["weighted"] for s in [edge, *busy])
+        self.assertEqual(tw.percent(share), "10%")  # 10.37%: rounds to the same 10% as the line
+        self.assertEqual(flags[0]["message"], "10.3% of the window's weighted total, over the floor (10.0%)")
+
     def test_three_identical_small_sessions_never_fire(self) -> None:
         trio = report(*(session(f"s{n}", inp=11_000, largest=11_000) for n in range(3)))
         self.assertEqual(tw.find_flags(trio, LIMITS), [])

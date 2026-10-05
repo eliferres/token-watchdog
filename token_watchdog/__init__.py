@@ -389,8 +389,11 @@ def find_flags(report: dict, thresholds: Dict[str, float]) -> List[dict]:
         for session in judged:
             share = session["weighted"] / total
             if share > limit:
+                # "10% ... over (10%)" reads as a contradiction; a decimal shows the gap.
+                places = 1 if percent(share) == percent(limit) else 0
                 flag("session-share", session, share, limit,
-                     f"{percent(share)} of the window's weighted total, over {reason} ({percent(limit)})")
+                     f"{percent(share, places)} of the window's weighted total, over {reason} "
+                     f"({percent(limit, places)})")
     return flags
 
 
@@ -512,10 +515,13 @@ def render_text(report: dict, top: int) -> str:
     return "\n".join(lines) + "\n"
 
 
-def percent(share: Optional[float]) -> str:
+def percent(share: Optional[float], decimals: int = 0) -> str:
     """Round down, so a cache that missed even once never reads as 100%."""
+    if share is None:
+        return "-"
+    scale = 10 ** decimals
     # The epsilon absorbs float error: 0.29 * 100 is 28.999999999999996.
-    return "-" if share is None else f"{math.floor(share * 100 + 1e-9)}%"
+    return f"{math.floor(share * 100 * scale + 1e-9) / scale:.{decimals}f}%"
 
 
 def _share(part: float, whole: float) -> float:
