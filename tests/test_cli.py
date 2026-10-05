@@ -225,6 +225,17 @@ class CliTest(unittest.TestCase):
             code, out, err = run(*self.window)
         self.assertEqual((code, out, err), (2, "", "token-watchdog: unexpected error: KeyError: 'days'\n"))
 
+    def test_a_reader_that_closes_early_gets_no_traceback(self) -> None:
+        for n in range(400):  # well past a pipe buffer of JSON
+            write_log(self.logs, "-home-dev-api", f"bulk{n}.jsonl", [
+                assistant(f"bulk{n}", "2026-09-29T12:00:00Z", f"bulk-session-{n}", inp=10, cwd="/home/dev/api")])
+        proc = subprocess.Popen([sys.executable, "-m", "token_watchdog", *self.window, "--json"],
+                                cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc.stdout.close()  # the reader is gone before the report is written
+        err = proc.stderr.read().decode()
+        proc.stderr.close()
+        self.assertEqual((proc.wait(), err), (0, ""))
+
     def test_version_and_module_entry_point(self) -> None:
         proc = subprocess.run([sys.executable, "-m", "token_watchdog", "--version"], cwd=str(ROOT),
                               capture_output=True, text=True)

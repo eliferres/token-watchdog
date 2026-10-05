@@ -604,5 +604,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except Exception as exc:  # exit 1 means "a flag fired", so a crash must never produce it
         print(f"{parser.prog}: unexpected error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
-    sys.stdout.write(text)
-    return 1 if report["flags"] else 0
+    code = 1 if report["flags"] else 0
+    try:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # The reader (head, a closed pager) left early. That is not an error of this
+        # run: point stdout at devnull so the interpreter's own flush at exit stays
+        # quiet, and keep the run's exit code.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+    return code
