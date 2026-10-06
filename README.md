@@ -1,6 +1,6 @@
 # token-watchdog
 
-Reads the session logs Claude Code keeps on your machine and tells you which sessions and projects burned tokens wastefully, and why: a cache that kept missing, or a context read back hundreds of times after it stopped being useful. It never calls a model, so the audit itself costs nothing, and it exits 1 when something needs a look, so it can run from cron or CI.
+Reads the session logs Claude Code keeps on your machine and tells you which sessions and projects burned tokens wastefully, and why.
 
 ![ci](https://github.com/eliferres/token-watchdog/actions/workflows/ci.yml/badge.svg)
 ![license](https://img.shields.io/badge/license-MIT-blue.svg)
@@ -8,6 +8,10 @@ Reads the session logs Claude Code keeps on your machine and tells you which ses
 ![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
 
 <img src="demo/terminal.svg" width="660" alt="Terminal session showing token-watchdog reading three days of synthetic Claude Code logs: a weighted total of 9.7M split by project, day and session, then four flags (a 56% cache hit, a context read back 201 times, one 533k call, one session holding 46% of the window), one skipped malformed line, and exit 1.">
+
+## What it does
+
+Reads the session logs Claude Code keeps on your machine and tells you which sessions and projects burned tokens wastefully, and why: a cache that kept missing, or a context read back hundreds of times after it stopped being useful. It never calls a model, so the audit itself costs nothing, and it exits 1 when something needs a look, so it can run from cron or CI.
 
 ## Ten seconds
 
