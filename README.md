@@ -2,12 +2,14 @@
 
 Reads the session logs Claude Code keeps on your machine and tells you which sessions and projects burned tokens wastefully, and why.
 
-![ci](https://github.com/eliferres/token-watchdog/actions/workflows/ci.yml/badge.svg)
-![license](https://img.shields.io/badge/license-MIT-blue.svg)
-![python](https://img.shields.io/badge/python-3.9%2B-blue.svg)
-![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
+[![ci](https://github.com/eliferres/token-watchdog/actions/workflows/ci.yml/badge.svg)](https://github.com/eliferres/token-watchdog/actions/workflows/ci.yml)
+![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)
+![dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
 
 <img src="demo/terminal.svg" width="660" alt="Terminal session showing token-watchdog reading three days of synthetic Claude Code logs: a weighted total of 9.7M split by project, day and session, then four flags (a 56% cache hit, a context read back 201 times, one 533k call, one session holding 46% of the window), one skipped malformed line, and exit 1.">
+
+The [fde-agent-skills](https://github.com/eliferres/fde-agent-skills) library documents the working methods behind this tool and its sibling tools as agent skills.
 
 ## What it does
 
